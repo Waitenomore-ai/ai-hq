@@ -53,6 +53,40 @@ class ApprovalService:
             db.refresh(request)
             return request
 
+    def get_request(self, request_id: str) -> ApprovalRequest:
+        with self.session_factory() as db:
+            request = db.get(ApprovalRequest, request_id)
+            if request is None:
+                raise KeyError(f"approval request not found: {request_id}")
+            return request
+
+    def list_requests(self, *, mission_id: str | None = None) -> list[ApprovalRequest]:
+        statement = select(ApprovalRequest)
+        if mission_id is not None:
+            statement = statement.where(ApprovalRequest.mission_id == mission_id)
+        statement = statement.order_by(ApprovalRequest.created_at, ApprovalRequest.id)
+        with self.session_factory() as db:
+            return list(db.scalars(statement))
+
+    def pending_for_fingerprint(
+        self,
+        mission_id: str,
+        action_fingerprint: str,
+    ) -> ApprovalRequest | None:
+        now = datetime.now(UTC)
+        with self.session_factory() as db:
+            requests = db.scalars(
+                select(ApprovalRequest).where(
+                    ApprovalRequest.mission_id == mission_id,
+                    ApprovalRequest.action_fingerprint == action_fingerprint,
+                    ApprovalRequest.state == ApprovalState.PENDING,
+                )
+            ).all()
+            for request in requests:
+                if _utc(request.expires_at) > now:
+                    return request
+            return None
+
     def decide(self, request_id: str, state: ApprovalState | str) -> ApprovalRequest:
         decision = ApprovalState(state)
         if decision is ApprovalState.PENDING:
