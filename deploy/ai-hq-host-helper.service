@@ -1,0 +1,28 @@
+[Unit]
+Description=AI HQ Host Helper
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=ai-hq-helper
+Group=ai-hq-helper
+SupplementaryGroups=docker systemd-journal
+EnvironmentFile=/etc/ai-hq/host-helper.env
+RuntimeDirectory=ai-hq
+RuntimeDirectoryMode=0770
+ExecStart=/opt/ai-hq/host-helper-venv/bin/python -m ai_hq.host_helper.server
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/ai-hq
+PrivateDevices=false
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
