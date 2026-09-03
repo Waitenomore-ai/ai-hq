@@ -1,9 +1,9 @@
 import pytest
-from ai_hq.tool_gateway.host_adapter import HostHelperAdapter
 
 from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists, HostCapability
 from ai_hq.missions.models import MissionRisk
 from ai_hq.tool_gateway.contracts import ToolAdapterError, ToolRequest
+from ai_hq.tool_gateway.host_adapter import HostHelperAdapter
 
 
 class FakeHostClient:
