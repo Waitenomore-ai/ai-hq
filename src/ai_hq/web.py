@@ -11,7 +11,8 @@ from ai_hq.auth.dependencies import SESSION_COOKIE, encode_session_cookie, resol
 from ai_hq.auth.passwords import verify_password
 from ai_hq.auth.rate_limit import LoginRateLimiter
 from ai_hq.auth.sessions import create_session, revoke_session
-from ai_hq.config import Settings
+from ai_hq.config import OperatingMode, Settings
+from ai_hq.models.system_state import SystemState
 
 _TEMPLATE_ENV = Environment(
     loader=FileSystemLoader(Path(__file__).with_name("templates")),
@@ -29,6 +30,17 @@ def external_path(settings: Settings, path: str) -> str:
 def _render(name: str, **context) -> HTMLResponse:
     template = _TEMPLATE_ENV.get_template(name)
     return HTMLResponse(template.render(**context))
+
+
+def _runtime_state(db) -> tuple[str, bool]:
+    state = db.get(SystemState, 1)
+    if state is None:
+        return OperatingMode.FREEZE.value, True
+    try:
+        mode = OperatingMode(state.operating_mode)
+    except ValueError:
+        return OperatingMode.FREEZE.value, True
+    return mode.value, state.simulation_mode
 
 
 def _client_identity(request: Request) -> str:
@@ -130,12 +142,13 @@ def install_web_routes(
             if resolved is None:
                 return RedirectResponse(external_path(settings, "/login"), status_code=303)
             _raw_token, record = resolved
+            operating_mode, simulation_mode = _runtime_state(db)
             return _render(
                 "home.html",
                 root_path=settings.root_path.rstrip("/"),
                 csrf_token=record.csrf_token,
-                operating_mode=settings.operating_mode.value,
-                simulation_mode=settings.simulation_mode,
+                operating_mode=operating_mode,
+                simulation_mode=simulation_mode,
             )
 
     @app.get("/api/session")
