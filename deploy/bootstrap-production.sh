@@ -12,7 +12,7 @@ SHA="$1"
 
 ARCHIVE="/tmp/ai-hq-release-${SHA}.tgz"
 ENV_DIR="/etc/ai-hq"
-ENV_FILE="$ENV_DIR/ai-hq.env"
+ENV_FILE="/etc/ai-hq/ai-hq.env"
 BASE="/opt/ai-hq"
 DRIPVID_NGINX="/etc/nginx/sites-available/dripvid.uk"
 NGINX_BACKUP="${DRIPVID_NGINX}.pre-ai-hq.$(date +%Y%m%d%H%M%S)"
