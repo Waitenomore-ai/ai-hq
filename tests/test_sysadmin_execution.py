@@ -1,5 +1,6 @@
-from ai_hq.departments.commander import RoutedAction
 from ai_hq.departments.sysadmin import SysAdminService
+
+from ai_hq.departments.commander import RoutedAction
 from ai_hq.host_helper.client import HostHelperError
 from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists, HostCapability
 from ai_hq.ledger.models import LedgerEventType
