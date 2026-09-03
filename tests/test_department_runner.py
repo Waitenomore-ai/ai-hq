@@ -1,4 +1,3 @@
-from ai_hq.departments.runner import DepartmentRunner
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -8,6 +7,7 @@ from ai_hq.agents.registry import AgentRegistry
 from ai_hq.config import OperatingMode
 from ai_hq.db import Base
 from ai_hq.departments.commander import route_sysadmin_mission
+from ai_hq.departments.runner import DepartmentRunner
 from ai_hq.departments.sysadmin import SysAdminService
 from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists, HostCapability
 from ai_hq.ledger.service import OperationsLedger
