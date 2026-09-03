@@ -17,8 +17,8 @@
     </div>
 
     <div class="hq-safety" aria-label="Operating safeguards">
-      <span class="hq-chip hq-chip--safe">Safe Mode</span>
-      <span class="hq-chip hq-chip--simulation">Simulation</span>
+      <span class="hq-chip hq-chip--safe">{{ operating_mode|capitalize }} Mode</span>
+      <span class="hq-chip hq-chip--simulation">Simulation {{ "On" if simulation_mode else "Off" }}</span>
       <span class="hq-connection" data-connection-status>Connecting…</span>
     </div>
 
