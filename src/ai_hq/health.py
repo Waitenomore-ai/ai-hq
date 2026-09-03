@@ -1,8 +1,12 @@
 from collections.abc import Callable
 from typing import Any
 
+from redis import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
+from ai_hq.config import get_settings
 from ai_hq.db import get_engine
 
 Probe = Callable[[], bool]
@@ -13,18 +17,19 @@ def database_probe() -> bool:
         with get_engine().connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
-    except Exception:
+    except SQLAlchemyError:
         return False
 
 
 def redis_probe() -> bool:
     try:
-        from redis import Redis
-        from ai_hq.config import get_settings
-
-        client = Redis.from_url(get_settings().redis_url, socket_connect_timeout=1, socket_timeout=1)
+        client = Redis.from_url(
+            get_settings().redis_url,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
         return bool(client.ping())
-    except Exception:
+    except RedisError:
         return False
 
 
