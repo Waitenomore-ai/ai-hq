@@ -87,13 +87,27 @@ class AIUsageService:
             if self._same_month(item.occurred_at, now)
         )
 
-        if self.budget.daily_limit is not None:
-            if daily_total + estimated_cost > self.budget.daily_limit:
-                return False, "daily_budget_exhausted"
-        if self.budget.monthly_limit is not None:
-            if monthly_total + estimated_cost > self.budget.monthly_limit:
-                return False, "monthly_budget_exhausted"
+        if (
+            self.budget.daily_limit is not None
+            and daily_total + estimated_cost > self.budget.daily_limit
+        ):
+            return False, "daily_budget_exhausted"
+        if (
+            self.budget.monthly_limit is not None
+            and monthly_total + estimated_cost > self.budget.monthly_limit
+        ):
+            return False, "monthly_budget_exhausted"
         return True, "within_budget"
+
+    def summary(self) -> dict[str, int | float]:
+        with self.session_factory() as session:
+            records = list(session.scalars(select(AIUsageRecord)).all())
+        return {
+            "requests": len(records),
+            "input_tokens": sum(item.input_tokens for item in records),
+            "output_tokens": sum(item.output_tokens for item in records),
+            "estimated_cost": sum(item.estimated_cost for item in records),
+        }
 
     @staticmethod
     def _normalise(value: datetime) -> datetime:
