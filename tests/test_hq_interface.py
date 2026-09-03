@@ -59,19 +59,20 @@ def build_authenticated_client():
         follow_redirects=False,
     )
     assert response.status_code == 303
-    return client
+    token = client.cookies.get("ai_hq_session")
+    return client, {"Cookie": f"ai_hq_session={token}"}
 
 
 def test_authenticated_home_renders_first_hq_floor_contract():
-    client = build_authenticated_client()
-    response = client.get("/")
+    client, auth = build_authenticated_client()
+    response = client.get("/", headers=auth)
     assert response.status_code == 200
     html = response.text
-    assert 'data-hq-viewport' in html
+    assert "data-hq-viewport" in html
     for key in ("commander", "communications", "calendar", "sysadmin", "approvals", "knowledge"):
         assert f'data-room-key="{key}"' in html
-    assert '/ai-hq/static/hq.css' in html
-    assert '/ai-hq/static/hq.js' in html
+    assert "/ai-hq/static/hq.css" in html
+    assert "/ai-hq/static/hq.js" in html
     assert "Safe Mode" in html
     assert "Simulation" in html
     assert "Status legend" in html
@@ -79,8 +80,8 @@ def test_authenticated_home_renders_first_hq_floor_contract():
 
 
 def test_hq_rooms_are_keyboard_controls_with_text_status():
-    client = build_authenticated_client()
-    html = client.get("/").text
+    client, auth = build_authenticated_client()
+    html = client.get("/", headers=auth).text
     assert html.count('class="hq-room') >= 6
     assert html.count('type="button"') >= 6
     assert 'data-agent-state="OFFLINE"' in html
@@ -88,15 +89,15 @@ def test_hq_rooms_are_keyboard_controls_with_text_status():
 
 
 def test_hq_interface_exposes_no_execution_controls():
-    client = build_authenticated_client()
-    html = client.get("/").text.casefold()
+    client, auth = build_authenticated_client()
+    html = client.get("/", headers=auth).text.casefold()
     for forbidden in ("execute mission", "send email", "restart service", "delete mission"):
         assert forbidden not in html
 
 
 def test_hq_mobile_and_reduced_motion_contract():
-    client = build_authenticated_client()
-    html = client.get("/").text
+    client, auth = build_authenticated_client()
+    html = client.get("/", headers=auth).text
     assert 'name="viewport" content="width=device-width, initial-scale=1"' in html
     css = client.get("/static/hq.css")
     assert css.status_code == 200
