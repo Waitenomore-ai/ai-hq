@@ -22,12 +22,23 @@ class RouteDecision:
 
 
 class ModelRouter:
-    def __init__(self, registry: ModelRegistry) -> None:
+    def __init__(
+        self,
+        registry: ModelRegistry,
+        *,
+        allow_paid: bool = False,
+        prefer_local: bool = True,
+    ) -> None:
         self.registry = registry
+        self.allow_paid = allow_paid
+        self.prefer_local = prefer_local
 
     def route(self, capability: CapabilityClass) -> RouteDecision:
         candidates = self.registry.candidates_for(capability)
         considered = len(candidates)
+
+        if not self.allow_paid:
+            candidates = [endpoint for endpoint in candidates if not endpoint.requires_payment]
 
         if capability is CapabilityClass.LOCAL_PRIVATE:
             candidates = [
@@ -40,12 +51,15 @@ class ModelRouter:
             return RouteDecision(
                 endpoint=None,
                 reason="no_available_model",
-                candidates_considered=considered if considered else 0,
+                candidates_considered=considered,
             )
 
         selected = min(
             candidates,
             key=lambda endpoint: (
+                0
+                if self.prefer_local and endpoint.provider_kind is ProviderKind.LOCAL
+                else 1,
                 endpoint.priority,
                 endpoint.provider,
                 endpoint.model,
