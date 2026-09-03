@@ -153,6 +153,30 @@ def test_router_prefers_capable_local_model_before_free_cloud():
     assert decision.endpoint == local
 
 
+def test_budget_guard_blocks_expensive_route_even_when_paid_ai_is_enabled():
+    paid = endpoint(
+        "paid-provider",
+        "reasoner",
+        {CapabilityClass.COMPLEX_REASONING},
+        priority=1,
+        paid=True,
+    )
+    router = ModelRouter(
+        ModelRegistry([paid]),
+        allow_paid=True,
+        budget_check=lambda cost: (False, "daily_budget_exhausted")
+        if cost > 0
+        else (True, "within_budget"),
+    )
+    decision = router.route(
+        CapabilityClass.COMPLEX_REASONING,
+        estimated_input_tokens=1000,
+        estimated_output_tokens=1000,
+    )
+    assert decision.endpoint is None
+    assert decision.reason == "daily_budget_exhausted"
+
+
 def test_phase_one_capability_classes_are_stable():
     assert {item.value for item in CapabilityClass} == {
         "classification",
