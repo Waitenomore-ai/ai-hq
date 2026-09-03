@@ -66,6 +66,86 @@ def test_snapshot_uses_durable_agent_and_mission_state():
     assert rooms["calendar"]["state"] == "OFFLINE"
 
 
+def test_commander_working_state_is_durable_and_clears_after_routing():
+    sessions = factory()
+    with sessions() as db:
+        mission = Mission(
+            title="Is Nginx running?",
+            description="Read-only service observation",
+            owner_agent="commander",
+            source="user",
+            status=MissionStatus.QUEUED,
+        )
+        db.add(mission)
+        db.flush()
+        db.add(
+            Agent(
+                key="commander",
+                display_name="Commander",
+                role="Coordinator",
+                status=AgentStatus.WORKING,
+                current_mission_id=mission.id,
+            )
+        )
+        db.commit()
+
+    service = HQStateService(sessions)
+    rooms = {room["key"]: room for room in service.snapshot()["rooms"]}
+    assert rooms["commander"]["state"] == "WORKING"
+    assert rooms["commander"]["mission_title"] == "Is Nginx running?"
+
+    with sessions() as db:
+        commander = db.get(Agent, "commander")
+        commander.status = AgentStatus.IDLE
+        commander.current_mission_id = None
+        db.commit()
+
+    rooms = {room["key"]: room for room in service.snapshot()["rooms"]}
+    assert rooms["commander"]["state"] == "IDLE"
+    assert rooms["commander"]["mission_title"] is None
+
+
+def test_sysadmin_completed_mission_projects_idle_after_agent_cleanup():
+    sessions = factory()
+    with sessions() as db:
+        mission = Mission(
+            title="Check AI HQ health",
+            description="Read-only health observation",
+            owner_agent="sysadmin",
+            source="user",
+            status=MissionStatus.RUNNING,
+        )
+        db.add(mission)
+        db.flush()
+        db.add(
+            Agent(
+                key="sysadmin",
+                display_name="SysAdmin",
+                role="Infrastructure",
+                status=AgentStatus.WORKING,
+                current_mission_id=mission.id,
+            )
+        )
+        db.commit()
+
+    service = HQStateService(sessions)
+    rooms = {room["key"]: room for room in service.snapshot()["rooms"]}
+    assert rooms["sysadmin"]["state"] == "WORKING"
+    assert rooms["sysadmin"]["mission_title"] == "Check AI HQ health"
+
+    with sessions() as db:
+        mission = db.get(Mission, mission.id)
+        sysadmin = db.get(Agent, "sysadmin")
+        mission.status = MissionStatus.COMPLETED
+        sysadmin.status = AgentStatus.IDLE
+        sysadmin.current_mission_id = None
+        db.commit()
+
+    rooms = {room["key"]: room for room in service.snapshot()["rooms"]}
+    assert rooms["sysadmin"]["state"] == "IDLE"
+    assert rooms["sysadmin"]["mission_title"] is None
+
+
 def test_shared_rooms_report_real_counts_without_agent_avatar():
     sessions = factory()
     with sessions() as db:
