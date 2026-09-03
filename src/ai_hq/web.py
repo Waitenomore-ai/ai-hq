@@ -134,6 +134,8 @@ def install_web_routes(
                 "home.html",
                 root_path=settings.root_path.rstrip("/"),
                 csrf_token=record.csrf_token,
+                operating_mode=settings.operating_mode.value,
+                simulation_mode=settings.simulation_mode,
             )
 
     @app.get("/api/session")
