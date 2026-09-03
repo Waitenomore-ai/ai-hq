@@ -18,6 +18,7 @@ class SafetyResult:
     action_fingerprint: str
     approval_request_id: str | None = None
     scoped_rule_id: str | None = None
+    simulation_mode: bool = False
 
 
 class SafetyService:
@@ -126,6 +127,7 @@ class SafetyService:
                 mission_status=MissionStatus.RUNNING,
                 action_fingerprint=fingerprint,
                 scoped_rule_id=scoped_rule.id if scoped_rule else None,
+                simulation_mode=simulation_mode,
             )
 
         pending = self.approvals.pending_for_fingerprint(mission_id, fingerprint)
@@ -157,4 +159,5 @@ class SafetyService:
             action_fingerprint=fingerprint,
             approval_request_id=pending.id,
             scoped_rule_id=scoped_rule.id if scoped_rule else None,
+            simulation_mode=simulation_mode,
         )
