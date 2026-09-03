@@ -1,10 +1,10 @@
-from ai_hq.missions.models import MissionRisk, MissionStatus
-from ai_hq.missions.service import MissionService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from ai_hq.db import Base
+from ai_hq.missions.models import MissionRisk, MissionStatus
+from ai_hq.missions.service import MissionService
 
 
 def build_service():
