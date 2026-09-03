@@ -106,7 +106,10 @@ def test_home_renders_durable_runtime_simulation_state():
     assert login.status_code == 303
 
     with factory() as db:
-        db.add(SystemState(id=1, operating_mode="safe", simulation_mode=False))
+        state = db.get(SystemState, 1)
+        assert state is not None
+        state.operating_mode = "safe"
+        state.simulation_mode = False
         db.commit()
 
     home = client.get("/", headers=proxied_auth_headers(client), follow_redirects=False)
