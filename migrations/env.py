@@ -10,6 +10,7 @@ from ai_hq.models import (  # noqa: F401
     KnowledgeMemory,
     LedgerEvent,
     Mission,
+    Notification,
     ScopedApprovalRule,
     SystemState,
 )
