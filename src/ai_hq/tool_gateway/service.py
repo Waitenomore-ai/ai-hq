@@ -8,7 +8,12 @@ from ai_hq.ledger.models import LedgerEventType
 from ai_hq.ledger.service import OperationsLedger
 from ai_hq.safety.policy import Decision
 from ai_hq.safety.service import SafetyService
-from ai_hq.tool_gateway.contracts import ToolOutcome, ToolOutcomeState, ToolRequest
+from ai_hq.tool_gateway.contracts import (
+    ToolAdapterError,
+    ToolOutcome,
+    ToolOutcomeState,
+    ToolRequest,
+)
 from ai_hq.tool_gateway.registry import ToolRegistry
 
 SessionFactory = Callable[[], Session]
@@ -79,7 +84,7 @@ class ToolGateway:
 
         try:
             result = adapter.execute(request)
-        except Exception:
+        except ToolAdapterError:
             self._record_result(request, state=ToolOutcomeState.FAILED)
             return ToolOutcome(
                 state=ToolOutcomeState.FAILED,
