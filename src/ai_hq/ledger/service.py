@@ -12,8 +12,9 @@ class OperationsLedger:
     def __init__(self, session_factory: SessionFactory):
         self.session_factory = session_factory
 
-    def record(
+    def add_to_session(
         self,
+        db: Session,
         *,
         mission_id: str,
         event_type: LedgerEventType | str,
@@ -28,8 +29,27 @@ class OperationsLedger:
             summary=summary,
             event_data=metadata or {},
         )
+        db.add(event)
+        return event
+
+    def record(
+        self,
+        *,
+        mission_id: str,
+        event_type: LedgerEventType | str,
+        summary: str,
+        agent_key: str | None = None,
+        metadata: dict | None = None,
+    ) -> LedgerEvent:
         with self.session_factory() as db:
-            db.add(event)
+            event = self.add_to_session(
+                db,
+                mission_id=mission_id,
+                agent_key=agent_key,
+                event_type=event_type,
+                summary=summary,
+                metadata=metadata,
+            )
             db.commit()
             db.refresh(event)
             return event
