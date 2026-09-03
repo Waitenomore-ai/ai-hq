@@ -1,3 +1,4 @@
+from ai_hq.tool_gateway.service import ToolGateway
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -10,7 +11,6 @@ from ai_hq.missions.service import MissionService
 from ai_hq.models.system_state import SystemState
 from ai_hq.tool_gateway.contracts import ToolOutcomeState, ToolRequest
 from ai_hq.tool_gateway.registry import ToolRegistry
-from ai_hq.tool_gateway.service import ToolGateway
 
 
 class FakeAdapter:
