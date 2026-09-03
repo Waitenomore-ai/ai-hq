@@ -131,9 +131,7 @@ class KnowledgeService:
     def _is_active(self, memory: KnowledgeMemory, now: datetime) -> bool:
         if memory.deleted_at is not None:
             return False
-        if memory.expires_at is not None and _utc(memory.expires_at) <= now:
-            return False
-        return True
+        return memory.expires_at is None or _utc(memory.expires_at) > now
 
     def _visible_to_agent(self, memory: KnowledgeMemory, agent_key: str | None) -> bool:
         if agent_key is None:
