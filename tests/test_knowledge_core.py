@@ -85,7 +85,7 @@ def test_working_memory_expiry_and_soft_delete_remove_from_active_retrieval():
         temporary=True,
         expires_at=datetime.now(UTC) - timedelta(seconds=1),
     )
-    assert [item.id for item in service.search("investigation")] == [active.id]
+    assert [item.id for item in service.search("worker")] == [active.id]
     service.delete_memory(active.id)
     assert service.search("latency") == []
     assert service.get_memory(active.id, include_deleted=True).deleted_at is not None
