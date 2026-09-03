@@ -11,6 +11,7 @@ SHA="$1"
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail "release SHA must be exactly 40 lowercase hex characters"
 
 ARCHIVE="/tmp/ai-hq-release-${SHA}.tgz"
+RELEASE_URL="https://github.com/Waitenomore-ai/ai-hq/archive/${SHA}.tar.gz"
 ENV_DIR="/etc/ai-hq"
 ENV_FILE="/etc/ai-hq/ai-hq.env"
 BASE="/opt/ai-hq"
@@ -19,14 +20,19 @@ NGINX_BACKUP="${DRIPVID_NGINX}.pre-ai-hq.$(date +%Y%m%d%H%M%S)"
 TMP_DIR="$(mktemp -d /tmp/ai-hq-bootstrap.XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-[[ -f "$ARCHIVE" ]] || fail "release archive not found: $ARCHIVE"
-[[ -f "$DRIPVID_NGINX" ]] || fail "DripVid nginx config not found: $DRIPVID_NGINX"
-
-for cmd in docker python3 openssl nginx systemctl tar; do
+for cmd in curl docker python3 openssl nginx systemctl tar; do
     command -v "$cmd" >/dev/null 2>&1 || fail "required command not found: $cmd"
 done
 
 docker compose version >/dev/null 2>&1 || fail "docker compose plugin is required"
+[[ -f "$DRIPVID_NGINX" ]] || fail "DripVid nginx config not found: $DRIPVID_NGINX"
+
+if [[ ! -f "$ARCHIVE" ]]; then
+    log "fetching immutable AI HQ release $SHA from GitHub"
+    curl -fL --retry 3 --connect-timeout 10 "$RELEASE_URL" -o "$ARCHIVE"
+fi
+
+tar -tzf "$ARCHIVE" >/dev/null || fail "release archive is not a valid gzip tar archive: $ARCHIVE"
 
 mkdir -p "$ENV_DIR" "$BASE/releases"
 chmod 750 "$ENV_DIR" "$BASE"
