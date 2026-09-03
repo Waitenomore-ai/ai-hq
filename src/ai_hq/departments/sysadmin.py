@@ -104,7 +104,7 @@ class SysAdminService:
             return SysAdminExecutionResult(MissionStatus.WAITING_APPROVAL, False, {}, None)
         if safety_result.decision is Decision.BLOCK:
             return self._failure(mission_id=mission_id, action=action, error="blocked")
-        if safety_result.decision is Decision.SIMULATE_ONLY:
+        if safety_result.simulation_mode or safety_result.decision is Decision.SIMULATE_ONLY:
             self._record_result(
                 mission_id=mission_id,
                 action=action,
