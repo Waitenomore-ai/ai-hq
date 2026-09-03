@@ -58,6 +58,13 @@ def build_client():
     return TestClient(app, base_url="https://testserver"), factory
 
 
+def proxied_auth_headers(client, **extra):
+    token = client.cookies.get("ai_hq_session")
+    headers = {"Cookie": f"ai_hq_session={token}"}
+    headers.update(extra)
+    return headers
+
+
 def test_unauthenticated_home_redirects_to_prefixed_login():
     client, _ = build_client()
     response = client.get("/", follow_redirects=False)
@@ -82,9 +89,9 @@ def test_successful_login_sets_secure_scoped_cookie_and_unlocks_home():
     assert "SameSite=lax" in cookie
     assert "Path=/ai-hq" in cookie
 
-    home = client.get("/")
+    home = client.get("/", headers=proxied_auth_headers(client), follow_redirects=False)
     assert home.status_code == 200
-    assert "AI HQ" in home.text
+    assert "Authenticated administrator session." in home.text
 
 
 def test_bad_password_is_generic_and_does_not_authenticate():
@@ -121,15 +128,22 @@ def test_logout_requires_csrf_and_revokes_session():
         assert record is not None
         csrf_token = record.csrf_token
 
-    rejected = client.post("/logout", data={"csrf_token": "wrong"}, follow_redirects=False)
+    rejected = client.post(
+        "/logout",
+        data={"csrf_token": "wrong"},
+        headers=proxied_auth_headers(client, Origin="https://testserver"),
+        follow_redirects=False,
+    )
     assert rejected.status_code == 403
 
     logged_out = client.post(
         "/logout",
         data={"csrf_token": csrf_token},
-        headers={"Origin": "https://testserver"},
+        headers=proxied_auth_headers(client, Origin="https://testserver"),
         follow_redirects=False,
     )
     assert logged_out.status_code == 303
     assert logged_out.headers["location"] == "/ai-hq/login"
-    assert client.get("/api/session").status_code == 401
+    assert client.get(
+        "/api/session", headers=proxied_auth_headers(client), follow_redirects=False
+    ).status_code == 401
