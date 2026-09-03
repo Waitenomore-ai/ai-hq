@@ -29,6 +29,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - /run/ai-hq/host-helper.sock:/run/ai-hq/host-helper.sock
     networks: [ai_hq]
     restart: unless-stopped
 
