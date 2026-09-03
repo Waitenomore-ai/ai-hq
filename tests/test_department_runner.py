@@ -1,3 +1,5 @@
+from ai_hq.departments.runner import DepartmentRunner
+
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -7,7 +9,6 @@ from ai_hq.agents.registry import AgentRegistry
 from ai_hq.config import OperatingMode
 from ai_hq.db import Base
 from ai_hq.departments.commander import route_sysadmin_mission
-from ai_hq.departments.runner import DepartmentRunner
 from ai_hq.departments.sysadmin import SysAdminService
 from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists, HostCapability
 from ai_hq.ledger.service import OperationsLedger
@@ -15,7 +16,6 @@ from ai_hq.missions.models import Mission, MissionRisk, MissionStatus
 from ai_hq.missions.service import MissionService
 from ai_hq.models.system_state import SystemState
 from ai_hq.safety.service import SafetyService
-
 
 ALLOW_LISTS = HostAllowLists(
     services=frozenset({"ai-hq", "nginx", "dripvid"}),
@@ -197,7 +197,7 @@ def test_runner_cleans_up_sysadmin_state_after_helper_failure():
 
 
 def test_runner_returns_false_when_no_queued_mission_exists():
-    _, ledger, missions, agents = build_runtime()
+    _, _, missions, agents = build_runtime()
 
     class UnusedSysAdmin:
         def execute(self, **_kwargs):
