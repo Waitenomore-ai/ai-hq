@@ -1,9 +1,9 @@
 import subprocess
 
 import pytest
-from ai_hq.host_helper.executor import MAX_RESPONSE_BYTES, CompletedCommand, HostExecutor
 
 from ai_hq.host_helper.contracts import HelperRequest, HostAllowLists, HostCapability
+from ai_hq.host_helper.executor import MAX_RESPONSE_BYTES, CompletedCommand, HostExecutor
 
 
 @pytest.fixture
