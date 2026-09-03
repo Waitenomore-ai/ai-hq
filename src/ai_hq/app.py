@@ -17,6 +17,7 @@ from ai_hq.hq.api import install_hq_routes
 from ai_hq.knowledge.api import install_knowledge_routes
 from ai_hq.missions.api import install_mission_routes
 from ai_hq.notifications.api import install_notification_routes
+from ai_hq.system_state import ensure_system_state
 from ai_hq.web import install_web_routes
 
 
@@ -49,6 +50,7 @@ def create_app(
             name="static",
         )
         factory = session_factory or get_session_factory()
+        ensure_system_state(factory)
         redis_connection = redis_client or Redis.from_url(
             settings.redis_url,
             socket_connect_timeout=1,
