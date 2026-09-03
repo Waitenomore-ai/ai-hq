@@ -1,11 +1,18 @@
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from ai_hq.config import OperatingMode
+from ai_hq.db import Base
 from ai_hq.departments.commander import RoutedAction
 from ai_hq.departments.sysadmin import SysAdminService
 from ai_hq.host_helper.client import HostHelperError
 from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists, HostCapability
 from ai_hq.ledger.models import LedgerEventType
 from ai_hq.missions.models import MissionRisk, MissionStatus
+from ai_hq.models.system_state import SystemState
 from ai_hq.safety.policy import Decision
-from ai_hq.safety.service import SafetyResult
+from ai_hq.safety.service import SafetyResult, SafetyService
 
 ALLOW_LISTS = HostAllowLists(
     services=frozenset({"ai-hq", "nginx", "dripvid"}),
@@ -113,6 +120,38 @@ def test_simulation_decision_never_invokes_helper_and_records_simulation():
         and record["metadata"]["simulated"] is True
         for record in ledger.records
     )
+
+
+def test_real_simulation_state_never_invokes_read_only_host_helper():
+    engine = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as db:
+        db.add(
+            SystemState(
+                id=1,
+                operating_mode=OperatingMode.NORMAL.value,
+                simulation_mode=True,
+            )
+        )
+        db.commit()
+
+    ledger = FakeLedger()
+    helper = FakeHelper(
+        HelperResponse(True, HostCapability.SERVICE_STATUS, "nginx", {"active_state": "active"})
+    )
+    service = make_service(SafetyService(factory, ledger=ledger), helper, ledger)
+
+    result = service.execute(mission_id="mission-real-simulation", action=action())
+
+    assert helper.calls == []
+    assert result.status is MissionStatus.COMPLETED
+    assert result.simulated is True
+    assert result.data == {}
 
 
 def test_block_decision_fails_closed_without_helper_execution():
