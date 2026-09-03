@@ -3,16 +3,142 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI HQ</title>
+  <title>AI HQ — Operations Floor</title>
+  <link rel="stylesheet" href="{{ root_path }}/static/hq.css">
 </head>
-<body>
-  <main>
-    <h1>AI HQ</h1>
-    <p>Authenticated administrator session.</p>
-    <form method="post" action="{{ root_path }}/logout">
+<body data-root-path="{{ root_path }}">
+  <header class="hq-topbar">
+    <div class="hq-brand">
+      <span class="hq-brand__mark" aria-hidden="true">◆</span>
+      <div>
+        <p class="hq-kicker">AI HQ</p>
+        <h1>Operations Floor</h1>
+      </div>
+    </div>
+
+    <div class="hq-safety" aria-label="Operating safeguards">
+      <span class="hq-chip hq-chip--safe">Safe Mode</span>
+      <span class="hq-chip hq-chip--simulation">Simulation</span>
+      <span class="hq-connection" data-connection-status>Connecting…</span>
+    </div>
+
+    <form class="hq-signout" method="post" action="{{ root_path }}/logout">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit">Sign out</button>
     </form>
+  </header>
+
+  <main class="hq-shell">
+    <section class="hq-sidebar" aria-label="HQ information">
+      <div class="hq-panel">
+        <p class="hq-panel__eyebrow">Floor 01</p>
+        <h2>Live operations</h2>
+        <p>Rooms mirror durable AI HQ state. Activity shown here comes from the mission and agent records.</p>
+      </div>
+
+      <div class="hq-panel" aria-label="Status legend">
+        <h2>Status legend</h2>
+        <ul class="hq-legend">
+          <li><span class="hq-light" data-status-light="WORKING"></span>Working</li>
+          <li><span class="hq-light" data-status-light="WAITING_APPROVAL"></span>Waiting approval</li>
+          <li><span class="hq-light" data-status-light="IDLE"></span>Idle</li>
+          <li><span class="hq-light" data-status-light="FAILED"></span>Failed</li>
+          <li><span class="hq-light" data-status-light="OFFLINE"></span>Offline</li>
+        </ul>
+      </div>
+
+      <div class="hq-panel hq-panel--compact">
+        <p><strong>Control:</strong> read-only floor view</p>
+        <p><strong>Refresh:</strong> every 10 seconds</p>
+      </div>
+    </section>
+
+    <section class="hq-stage" aria-label="Top-down AI HQ floor">
+      <div class="hq-viewport" data-hq-viewport tabindex="0" aria-label="Scrollable operations floor">
+        <div class="hq-floor" data-floor-key="operations">
+          <div class="hq-corridor hq-corridor--vertical" aria-hidden="true"></div>
+          <div class="hq-corridor hq-corridor--horizontal" aria-hidden="true"></div>
+          <div class="hq-floor-core" aria-hidden="true">HQ</div>
+
+          <button class="hq-room hq-room--communications" type="button" data-room-key="communications" data-agent-state="OFFLINE" data-room-state="OFFLINE">
+            <span class="hq-room__head"><span>Communications</span><span class="hq-light" data-room-light></span></span>
+            <span class="hq-room__interior">
+              <span class="hq-desk" aria-hidden="true"><span class="hq-monitor"></span></span>
+              <span class="hq-avatar" data-agent-avatar aria-hidden="true"><span></span></span>
+            </span>
+            <span class="hq-room__status" data-room-status>Status: Offline</span>
+            <span class="hq-room__mission" data-room-mission>No active mission</span>
+          </button>
+
+          <button class="hq-room hq-room--calendar" type="button" data-room-key="calendar" data-agent-state="OFFLINE" data-room-state="OFFLINE">
+            <span class="hq-room__head"><span>Calendar</span><span class="hq-light" data-room-light></span></span>
+            <span class="hq-room__interior">
+              <span class="hq-desk" aria-hidden="true"><span class="hq-monitor"></span></span>
+              <span class="hq-avatar" data-agent-avatar aria-hidden="true"><span></span></span>
+            </span>
+            <span class="hq-room__status" data-room-status>Status: Offline</span>
+            <span class="hq-room__mission" data-room-mission>No active mission</span>
+          </button>
+
+          <button class="hq-room hq-room--approvals hq-room--shared" type="button" data-room-key="approvals" data-room-state="IDLE" data-shared-room="true">
+            <span class="hq-room__head"><span>Approval Station</span><span class="hq-light" data-room-light></span></span>
+            <span class="hq-room__interior hq-room__interior--station" aria-hidden="true">
+              <span class="hq-terminal-stack"><span></span><span></span><span></span></span>
+            </span>
+            <span class="hq-room__status" data-room-status>Status: Idle</span>
+            <span class="hq-room__mission" data-room-count>0 pending approvals</span>
+          </button>
+
+          <button class="hq-room hq-room--commander" type="button" data-room-key="commander" data-agent-state="OFFLINE" data-room-state="OFFLINE">
+            <span class="hq-room__head"><span>Commander HQ</span><span class="hq-light" data-room-light></span></span>
+            <span class="hq-room__interior hq-room__interior--command">
+              <span class="hq-command-table" aria-hidden="true"></span>
+              <span class="hq-avatar hq-avatar--commander" data-agent-avatar aria-hidden="true"><span></span></span>
+            </span>
+            <span class="hq-room__status" data-room-status>Status: Offline</span>
+            <span class="hq-room__mission" data-room-mission>No active mission</span>
+          </button>
+
+          <button class="hq-room hq-room--knowledge hq-room--shared" type="button" data-room-key="knowledge" data-room-state="IDLE" data-shared-room="true">
+            <span class="hq-room__head"><span>Knowledge Core</span><span class="hq-light" data-room-light></span></span>
+            <span class="hq-room__interior hq-room__interior--core" aria-hidden="true">
+              <span class="hq-data-core"><span></span></span>
+            </span>
+            <span class="hq-room__status" data-room-status>Status: Idle</span>
+            <span class="hq-room__mission" data-room-count>0 memories</span>
+          </button>
+
+          <button class="hq-room hq-room--sysadmin" type="button" data-room-key="sysadmin" data-agent-state="OFFLINE" data-room-state="OFFLINE">
+            <span class="hq-room__head"><span>SysAdmin</span><span class="hq-light" data-room-light></span></span>
+            <span class="hq-room__interior">
+              <span class="hq-server-rack" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span class="hq-avatar" data-agent-avatar aria-hidden="true"><span></span></span>
+            </span>
+            <span class="hq-room__status" data-room-status>Status: Offline</span>
+            <span class="hq-room__mission" data-room-mission>No active mission</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="hq-detail" data-room-detail aria-live="polite" aria-label="Room details">
+      <div class="hq-detail__empty" data-detail-empty>
+        <p class="hq-panel__eyebrow">Room inspector</p>
+        <h2>Select a room</h2>
+        <p>Click or tap a room to inspect its current state.</p>
+      </div>
+      <div class="hq-detail__content" data-detail-content hidden>
+        <p class="hq-panel__eyebrow">Room inspector</p>
+        <h2 data-detail-title></h2>
+        <dl>
+          <div><dt>Status</dt><dd data-detail-status></dd></div>
+          <div><dt>Agent</dt><dd data-detail-agent></dd></div>
+          <div><dt>Current work</dt><dd data-detail-mission></dd></div>
+        </dl>
+      </div>
+    </aside>
   </main>
+
+  <script src="{{ root_path }}/static/hq.js" defer></script>
 </body>
 </html>
