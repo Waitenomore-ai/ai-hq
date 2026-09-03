@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE=/opt/ai-hq
+RELEASES="$BASE/releases"
+APP_LINK="$BASE/app"
+ENV_FILE=/etc/ai-hq/ai-hq.env
+KEEP_RELEASES=5
+
+fail(){ echo "ai-hq-deploy: $*" >&2; exit 1; }
+
+[[ $# -eq 2 ]] || fail "usage: ai-hq-deploy <sha> <archive>"
+SHA="$1"
+ARCHIVE="$2"
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail "invalid commit SHA"
+EXPECTED="/tmp/ai-hq-release-${SHA}.tgz"
+[[ "$ARCHIVE" == "$EXPECTED" ]] || fail "unexpected archive path"
+[[ -f "$ARCHIVE" ]] || fail "release archive not found"
+[[ -f "$ENV_FILE" ]] || fail "production environment file is missing"
+
+for command in flock tar docker curl nginx; do
+  command -v "$command" >/dev/null || fail "$command is required"
+done
+
+# Production activation is deliberately fail-closed and starts safe/simulated.
+grep -Eq '^AI_HQ_ADMIN_PASSWORD_HASH=.+$' "$ENV_FILE" || fail "AI HQ admin password hash is missing"
+grep -Eq '^AI_HQ_SESSION_SECRET=.{32,}$' "$ENV_FILE" || fail "AI HQ session secret is missing or too short"
+grep -Eq '^AI_HQ_OPERATING_MODE=safe$' "$ENV_FILE" || fail "AI HQ must deploy in safe mode"
+grep -Eq '^AI_HQ_SIMULATION_MODE=true$' "$ENV_FILE" || fail "AI HQ must deploy with simulation mode enabled"
+
+nginx -t >/dev/null
+
+exec 9>/run/lock/ai-hq-deploy.lock
+flock -n 9 || fail "another AI HQ deployment is already running"
+trap 'rm -f "$ARCHIVE"' EXIT
+
+mkdir -p "$RELEASES"
+RELEASE="$RELEASES/$SHA"
+rm -rf "$RELEASE"
+mkdir -p "$RELEASE"
+tar -xzf "$ARCHIVE" -C "$RELEASE" --no-same-owner --no-same-permissions
+
+for required in pyproject.toml compose.yaml Dockerfile docker/entrypoint-web.sh; do
+  [[ -f "$RELEASE/$required" ]] || fail "release is missing $required"
+done
+
+compose_release() {
+  local release="$1"
+  shift
+  AI_HQ_ENV_FILE="$ENV_FILE" docker compose \
+    -p ai-hq \
+    --env-file "$ENV_FILE" \
+    -f "$release/compose.yaml" \
+    "$@"
+}
+
+compose_release "$RELEASE" config >/dev/null
+
+PREVIOUS=""
+if [[ -L "$APP_LINK" ]]; then
+  PREVIOUS="$(readlink -f "$APP_LINK" || true)"
+elif [[ -e "$APP_LINK" ]]; then
+  fail "$APP_LINK must be a symlink before automatic deployment"
+fi
+
+rollback() {
+  echo "ai-hq-deploy: rollback started" >&2
+  if [[ -n "$PREVIOUS" && -d "$PREVIOUS" && -f "$PREVIOUS/compose.yaml" ]]; then
+    compose_release "$PREVIOUS" up -d --build
+    ROLLBACK_LINK="$BASE/.app-rollback"
+    rm -f "$ROLLBACK_LINK"
+    ln -s "$PREVIOUS" "$ROLLBACK_LINK"
+    mv -Tf "$ROLLBACK_LINK" "$APP_LINK"
+  else
+    compose_release "$RELEASE" down || true
+  fi
+}
+
+compose_release "$RELEASE" up -d --build
+
+healthy=false
+for _ in $(seq 1 40); do
+  if curl -fsS --max-time 3 http://127.0.0.1:8090/health/ready >/dev/null; then
+    healthy=true
+    break
+  fi
+  sleep 2
+done
+
+if [[ "$healthy" != true ]]; then
+  rollback
+  fail "new release failed readiness and was rolled back"
+fi
+
+NEW_LINK="$BASE/.app-${SHA}"
+rm -f "$NEW_LINK"
+ln -s "$RELEASE" "$NEW_LINK"
+mv -Tf "$NEW_LINK" "$APP_LINK"
+
+CURRENT="$(readlink -f "$APP_LINK")"
+mapfile -t OLD_RELEASES < <(
+  find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' |
+    sort -nr |
+    awk -v keep="$KEEP_RELEASES" 'NR>keep{$1="";sub(/^ /,"");print}'
+)
+for old in "${OLD_RELEASES[@]:-}"; do
+  [[ -n "$old" ]] || continue
+  [[ "$old" == "$CURRENT" ]] && continue
+  [[ -n "$PREVIOUS" && "$old" == "$PREVIOUS" ]] && continue
+  rm -rf -- "$old"
+done
+
+echo "ai-hq-deploy: deployed $SHA successfully"
+echo "ai-hq-deploy: active release $CURRENT"
+echo "ai-hq-deploy: run deploy/check-production.sh after the validated Nginx /ai-hq route is active"
