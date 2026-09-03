@@ -51,7 +51,7 @@ def _validate_target(capability: HostCapability, target: object, allow_lists: Ho
 
 def validate_request(payload: dict, allow_lists: HostAllowLists) -> HelperRequest:
     if not isinstance(payload, dict):
-        raise ValueError("invalid request")
+        raise TypeError("invalid request")
 
     try:
         capability = HostCapability(payload.get("capability"))
@@ -64,7 +64,7 @@ def validate_request(payload: dict, allow_lists: HostAllowLists) -> HelperReques
 
     params = payload.get("params", {})
     if not isinstance(params, dict):
-        raise ValueError("invalid parameters")
+        raise TypeError("invalid parameters")
 
     target = payload.get("target")
 
