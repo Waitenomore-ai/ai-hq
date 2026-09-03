@@ -95,6 +95,25 @@ def test_hq_interface_exposes_no_execution_controls():
         assert forbidden not in html
 
 
+def test_shared_rooms_do_not_render_agent_avatars():
+    client, auth = build_authenticated_client()
+    html = client.get("/", headers=auth).text
+    for key in ("approvals", "knowledge"):
+        start = html.index(f'data-room-key="{key}"')
+        end = html.index("</button>", start)
+        room = html[start:end]
+        assert 'data-shared-room="true"' in room
+        assert "data-agent-avatar" not in room
+        assert "data-agent-state" not in room
+
+
+def test_unknown_state_falls_back_to_offline_in_client_projection():
+    client, _auth = build_authenticated_client()
+    script = client.get("/static/hq.js")
+    assert script.status_code == 200
+    assert 'knownStates.has(room.state) ? room.state : "OFFLINE"' in script.text
+
+
 def test_hq_mobile_and_reduced_motion_contract():
     client, auth = build_authenticated_client()
     html = client.get("/", headers=auth).text
