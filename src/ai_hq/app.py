@@ -9,6 +9,7 @@ from ai_hq.db import get_session_factory
 from ai_hq.health import database_probe as default_database_probe
 from ai_hq.health import readiness_payload
 from ai_hq.health import redis_probe as default_redis_probe
+from ai_hq.missions.api import install_mission_routes
 from ai_hq.web import install_web_routes
 
 
@@ -47,6 +48,11 @@ def create_app(
             settings=settings,
             session_factory=factory,
             redis_client=redis_connection,
+        )
+        install_mission_routes(
+            app,
+            settings=settings,
+            session_factory=factory,
         )
 
     return app
