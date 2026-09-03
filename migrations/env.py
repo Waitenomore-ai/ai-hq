@@ -3,7 +3,15 @@ from sqlalchemy import engine_from_config, pool
 
 from ai_hq.config import get_settings
 from ai_hq.db import Base
-from ai_hq.models import AdminSession, Agent, LedgerEvent, Mission, SystemState  # noqa: F401
+from ai_hq.models import (  # noqa: F401
+    AdminSession,
+    Agent,
+    ApprovalRequest,
+    LedgerEvent,
+    Mission,
+    ScopedApprovalRule,
+    SystemState,
+)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
