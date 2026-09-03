@@ -102,6 +102,27 @@ class MissionService:
         with self.session_factory() as db:
             return list(db.scalars(select(Mission).order_by(Mission.created_at, Mission.id)))
 
+    def oldest_queued(self) -> Mission | None:
+        with self.session_factory() as db:
+            return db.scalar(
+                select(Mission)
+                .where(Mission.status == MissionStatus.QUEUED)
+                .order_by(Mission.created_at, Mission.id)
+                .limit(1)
+            )
+
+    def assign_owner(self, mission_id: str, owner_agent: str) -> Mission:
+        with self.session_factory() as db:
+            mission = db.get(Mission, mission_id)
+            if mission is None:
+                raise KeyError(f"mission not found: {mission_id}")
+            if mission.status is not MissionStatus.QUEUED:
+                raise ValueError("mission must be queued before owner assignment")
+            mission.owner_agent = owner_agent
+            db.commit()
+            db.refresh(mission)
+            return mission
+
     def transition(
         self,
         mission_id: str,
