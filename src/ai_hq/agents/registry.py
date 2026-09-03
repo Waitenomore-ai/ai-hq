@@ -3,7 +3,7 @@ from collections.abc import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ai_hq.agents.models import Agent
+from ai_hq.agents.models import Agent, AgentStatus
 
 SessionFactory = Callable[[], Session]
 
@@ -91,4 +91,21 @@ class AgentRegistry:
             agent = db.scalar(select(Agent).where(Agent.key == key))
             if agent is None:
                 raise KeyError(f"agent not found: {key}")
+            return agent
+
+    def set_state(
+        self,
+        key: str,
+        status: AgentStatus | str,
+        *,
+        current_mission_id: str | None,
+    ) -> Agent:
+        with self.session_factory() as db:
+            agent = db.scalar(select(Agent).where(Agent.key == key))
+            if agent is None:
+                raise KeyError(f"agent not found: {key}")
+            agent.status = AgentStatus(status)
+            agent.current_mission_id = current_mission_id
+            db.commit()
+            db.refresh(agent)
             return agent
