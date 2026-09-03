@@ -31,4 +31,4 @@ candidate.write_text(rendered)
 PY
 
 echo "ai-hq-nginx-render: candidate written to $CANDIDATE"
-echo "ai-hq-nginx-render: validate with: sudo nginx -t -c $CANDIDATE (or install candidate then run sudo nginx -t)"
+echo "ai-hq-nginx-render: review and install the candidate using normal site config management, then run sudo nginx -t before any reload"
