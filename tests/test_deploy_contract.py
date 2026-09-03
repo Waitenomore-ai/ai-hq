@@ -37,3 +37,14 @@ def test_production_check_covers_dripvid_and_ai_hq_without_secrets():
     assert "https://dripvid.uk/ai-hq/health/ready" in text
     assert "AI_HQ_ADMIN_PASSWORD_HASH" not in text
     assert "AI_HQ_SESSION_SECRET" not in text
+
+
+def test_host_helper_installer_restores_nonsecret_umask_before_venv_creation():
+    text = Path("deploy/install-host-helper.sh").read_text()
+    secret_umask = text.index("umask 077")
+    normal_umask = text.index("umask 022")
+    venv_create = text.index('python3 -m venv "$VENV"')
+
+    assert secret_umask < normal_umask < venv_create
+    assert 'chmod -R a+rX "$VENV"' in text
+    assert 'test -x "$VENV/bin/python"' in text
