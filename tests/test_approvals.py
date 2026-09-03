@@ -1,11 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
+from ai_hq.approvals.models import ApprovalState
+from ai_hq.approvals.service import ApprovalService, canonical_action_fingerprint
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ai_hq.approvals.models import ApprovalState
-from ai_hq.approvals.service import ApprovalService, canonical_action_fingerprint
 from ai_hq.db import Base
 from ai_hq.missions.models import MissionRisk
 from ai_hq.missions.service import MissionService
