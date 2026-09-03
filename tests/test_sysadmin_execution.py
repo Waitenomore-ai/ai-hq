@@ -8,7 +8,6 @@ from ai_hq.missions.models import MissionRisk, MissionStatus
 from ai_hq.safety.policy import Decision
 from ai_hq.safety.service import SafetyResult
 
-
 ALLOW_LISTS = HostAllowLists(
     services=frozenset({"ai-hq", "nginx", "dripvid"}),
     containers=frozenset({"ai-hq-web", "ai-hq-worker", "dripvid"}),
