@@ -1,6 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from ai_hq.db import Base
 from ai_hq.knowledge.models import (
     MemoryCategory,
     MemorySensitivity,
@@ -8,11 +13,6 @@ from ai_hq.knowledge.models import (
     VerificationState,
 )
 from ai_hq.knowledge.service import KnowledgeService
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from ai_hq.db import Base
 
 
 def build_service():
