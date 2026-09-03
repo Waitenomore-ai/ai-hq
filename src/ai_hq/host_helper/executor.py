@@ -24,7 +24,6 @@ SERVICE_UNITS = {
 CONTAINER_TARGETS = {
     "ai-hq-web": "ai-hq-web-1",
     "ai-hq-worker": "ai-hq-worker-1",
-    "dripvid": "dripvid",
 }
 LOG_TARGETS = {
     "ai-hq": ("journal", "ai-hq-host-helper.service"),
