@@ -1,5 +1,4 @@
 import pytest
-
 from ai_hq.host_helper.contracts import HostAllowLists, HostCapability, validate_request
 
 
