@@ -11,6 +11,7 @@ from ai_hq.db import get_session_factory
 from ai_hq.health import database_probe as default_database_probe
 from ai_hq.health import readiness_payload
 from ai_hq.health import redis_probe as default_redis_probe
+from ai_hq.hq.api import install_hq_routes
 from ai_hq.knowledge.api import install_knowledge_routes
 from ai_hq.missions.api import install_mission_routes
 from ai_hq.notifications.api import install_notification_routes
@@ -74,6 +75,11 @@ def create_app(
             session_factory=factory,
         )
         install_ai_router_routes(
+            app,
+            settings=settings,
+            session_factory=factory,
+        )
+        install_hq_routes(
             app,
             settings=settings,
             session_factory=factory,
