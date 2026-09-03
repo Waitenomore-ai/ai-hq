@@ -5,6 +5,7 @@ from ai_hq.ledger.models import LedgerEvent
 from ai_hq.missions.models import Mission
 from ai_hq.models.admin_session import AdminSession
 from ai_hq.models.system_state import SystemState
+from ai_hq.notifications.models import Notification
 
 __all__ = [
     "AdminSession",
@@ -13,6 +14,7 @@ __all__ = [
     "KnowledgeMemory",
     "LedgerEvent",
     "Mission",
+    "Notification",
     "ScopedApprovalRule",
     "SystemState",
 ]
