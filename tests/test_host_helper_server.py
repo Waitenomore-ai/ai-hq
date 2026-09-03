@@ -5,9 +5,9 @@ import threading
 from pathlib import Path
 
 import pytest
-
-from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists, HostCapability
 from ai_hq.host_helper.server import MAX_REQUEST_BYTES, HostHelperServer
+
+from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists
 
 
 class FakeExecutor:
