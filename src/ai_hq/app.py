@@ -1,7 +1,9 @@
 from collections.abc import Callable
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from redis import Redis
 
 from ai_hq.ai_router.api import install_ai_router_routes
@@ -42,6 +44,11 @@ def create_app(
         return JSONResponse(status_code=status_code, content=payload)
 
     if settings is not None:
+        app.mount(
+            "/static",
+            StaticFiles(directory=Path(__file__).with_name("static")),
+            name="static",
+        )
         factory = session_factory or get_session_factory()
         redis_connection = redis_client or Redis.from_url(
             settings.redis_url,
