@@ -1,5 +1,4 @@
 import pytest
-
 from ai_hq.tool_gateway.contracts import ToolRequest
 from ai_hq.tool_gateway.registry import ToolRegistry
 
