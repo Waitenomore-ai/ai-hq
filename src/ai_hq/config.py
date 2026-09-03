@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     admin_password_hash: str | None = None
     session_secret: str | None = None
     session_lifetime_hours: int = 12
+    host_helper_socket: str = "/run/ai-hq/host-helper.sock"
+    host_helper_credential: str | None = None
 
     @property
     def is_production(self) -> bool:
