@@ -12,7 +12,7 @@ fail() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BASE=/opt/ai-hq
-VENV="$BASE/host-helper-venv"
+VENV=/opt/ai-hq/host-helper-venv
 ETC_DIR=/etc/ai-hq
 HELPER_ENV="$ETC_DIR/host-helper.env"
 AI_ENV="$ETC_DIR/ai-hq.env"
