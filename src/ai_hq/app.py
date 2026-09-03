@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from redis import Redis
 
+from ai_hq.ai_router.api import install_ai_router_routes
 from ai_hq.approvals.api import install_approval_routes
 from ai_hq.config import Settings, get_settings
 from ai_hq.db import get_session_factory
@@ -68,6 +69,11 @@ def create_app(
             session_factory=factory,
         )
         install_notification_routes(
+            app,
+            settings=settings,
+            session_factory=factory,
+        )
+        install_ai_router_routes(
             app,
             settings=settings,
             session_factory=factory,
