@@ -87,7 +87,7 @@ Store that value as `AI_HQ_SESSION_SECRET` in `/etc/ai-hq/ai-hq.env`. Production
 A safe host-side workflow is:
 
 ```bash
-./deploy/render-nginx.sh /etc/nginx/sites-available/dripvid.uk /tmp/dripvid.uk.ai-hq.candidate
+bash deploy/render-nginx.sh /etc/nginx/sites-available/dripvid.uk /tmp/dripvid.uk.ai-hq.candidate
 # Review the candidate, install it using the server's normal config-management process,
 sudo nginx -t
 sudo systemctl reload nginx
@@ -97,12 +97,12 @@ Never reload Nginx if `nginx -t` fails.
 
 ### Versioned deployment
 
-`deploy/ai-hq-deploy` accepts an exact Git SHA and `/tmp/ai-hq-release-<sha>.tgz`, deploys it under `/opt/ai-hq/releases`, starts the Compose stack using `/etc/ai-hq/ai-hq.env`, waits for readiness, atomically switches `/opt/ai-hq/app`, and rolls back on readiness failure.
+`deploy/ai-hq-deploy` accepts an exact Git SHA and `/tmp/ai-hq-release-<sha>.tgz`, deploys it under `/opt/ai-hq/releases`, starts the Compose stack using `/etc/ai-hq/ai-hq.env`, waits for readiness, atomically switches `/opt/ai-hq/app`, and rolls back on readiness failure. Invoke repository deployment scripts with `bash` unless they have deliberately been installed with executable permissions.
 
 After Nginx routing is active, run:
 
 ```bash
-./deploy/check-production.sh
+bash deploy/check-production.sh
 ```
 
 The production check verifies DripVid still responds, AI HQ login and health endpoints respond, and port 8090 is not publicly bound.
