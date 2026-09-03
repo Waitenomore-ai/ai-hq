@@ -10,6 +10,7 @@ def endpoint(
     priority=100,
     kind=ProviderKind.CLOUD,
     enabled=True,
+    paid=False,
 ):
     return ModelEndpoint(
         provider=provider,
@@ -18,8 +19,9 @@ def endpoint(
         priority=priority,
         provider_kind=kind,
         enabled=enabled,
-        input_cost_per_million=1.0,
-        output_cost_per_million=2.0,
+        requires_payment=paid,
+        input_cost_per_million=1.0 if paid else 0.0,
+        output_cost_per_million=2.0 if paid else 0.0,
     )
 
 
@@ -45,7 +47,7 @@ def test_router_falls_back_when_preferred_provider_is_unavailable():
 
     decision = ModelRouter(registry).route(CapabilityClass.FAST_REASONING)
     assert decision.endpoint == fallback
-    assert decision.candidates_considered == 2
+    assert decision.candidates_considered == 1
 
 
 def test_disabled_models_are_never_selected():
@@ -108,6 +110,47 @@ def test_routing_order_is_deterministic_when_priorities_match():
     decision = ModelRouter(registry).route(CapabilityClass.FAST_REASONING)
     assert decision.endpoint is not None
     assert (decision.endpoint.provider, decision.endpoint.model) == ("a-provider", "a-model")
+
+
+def test_paid_models_are_disabled_by_default():
+    free = endpoint(
+        "free-provider",
+        "free-model",
+        {CapabilityClass.COMPLEX_REASONING},
+        priority=50,
+    )
+    paid = endpoint(
+        "paid-provider",
+        "paid-model",
+        {CapabilityClass.COMPLEX_REASONING},
+        priority=1,
+        paid=True,
+    )
+    decision = ModelRouter(ModelRegistry([paid, free])).route(
+        CapabilityClass.COMPLEX_REASONING
+    )
+    assert decision.endpoint == free
+
+
+def test_router_prefers_capable_local_model_before_free_cloud():
+    cloud = endpoint(
+        "free-cloud",
+        "fast-cloud",
+        {CapabilityClass.FAST_REASONING},
+        priority=1,
+        kind=ProviderKind.CLOUD,
+    )
+    local = endpoint(
+        "ollama",
+        "local-fast",
+        {CapabilityClass.FAST_REASONING},
+        priority=100,
+        kind=ProviderKind.LOCAL,
+    )
+    decision = ModelRouter(ModelRegistry([cloud, local])).route(
+        CapabilityClass.FAST_REASONING
+    )
+    assert decision.endpoint == local
 
 
 def test_phase_one_capability_classes_are_stable():
