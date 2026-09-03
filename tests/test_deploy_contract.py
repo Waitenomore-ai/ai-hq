@@ -39,12 +39,13 @@ def test_production_check_covers_dripvid_and_ai_hq_without_secrets():
     assert "AI_HQ_SESSION_SECRET" not in text
 
 
-def test_host_helper_installer_restores_nonsecret_umask_before_venv_creation():
+def test_host_helper_installer_restores_nonsecret_umask_and_secures_venv():
     text = Path("deploy/install-host-helper.sh").read_text()
     secret_umask = text.index("umask 077")
     normal_umask = text.index("umask 022")
     venv_create = text.index('python3 -m venv "$VENV"')
 
     assert secret_umask < normal_umask < venv_create
-    assert 'chmod -R a+rX "$VENV"' in text
-    assert 'test -x "$VENV/bin/python"' in text
+    assert 'chown -R root:ai-hq-helper "$VENV"' in text
+    assert 'chmod -R u+rwX,g+rX,o-rwx "$VENV"' in text
+    assert 'runuser -u ai-hq-helper -- "$VENV/bin/python" -c' in text
