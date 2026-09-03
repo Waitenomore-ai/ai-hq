@@ -40,3 +40,11 @@ def test_bootstrap_requires_exact_release_sha_and_archive():
     assert "/tmp/ai-hq-release-${SHA}.tgz" in text
     assert "ai-hq-deploy" in text
     assert "check-production.sh" in text
+
+
+def test_bootstrap_fetches_missing_exact_sha_archive_from_github():
+    text = Path("deploy/bootstrap-production.sh").read_text()
+    assert "curl" in text
+    assert "Waitenomore-ai/ai-hq/archive/${SHA}.tar.gz" in text
+    assert "curl -fL" in text
+    assert "tar -tzf" in text
