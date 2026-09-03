@@ -1,4 +1,5 @@
 from ai_hq.ai_router.models import CapabilityClass, ModelEndpoint
+
 from ai_hq.ai_router.router import ModelRouter
 
 
