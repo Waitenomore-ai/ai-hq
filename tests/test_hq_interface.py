@@ -73,8 +73,8 @@ def test_authenticated_home_renders_first_hq_floor_contract():
         assert f'data-room-key="{key}"' in html
     assert "/ai-hq/static/hq.css" in html
     assert "/ai-hq/static/hq.js" in html
-    assert "Safe Mode" in html
-    assert "Simulation" in html
+    assert "Freeze Mode" in html
+    assert "Simulation On" in html
     assert "Status legend" in html
     assert "Sign out" in html
 
