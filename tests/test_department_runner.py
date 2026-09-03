@@ -1,5 +1,4 @@
 from ai_hq.departments.runner import DepartmentRunner
-
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
