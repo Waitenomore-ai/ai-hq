@@ -11,6 +11,7 @@ from ai_hq.ledger.service import OperationsLedger
 from ai_hq.missions.service import MissionService
 from ai_hq.queue import redis_ping
 from ai_hq.safety.service import SafetyService
+from ai_hq.system_state import ensure_system_state
 
 
 def execution_allowed(mode: OperatingMode) -> bool:
@@ -24,6 +25,7 @@ class _UnavailableHostHelperClient:
 
 def build_department_runner(settings: Settings) -> DepartmentRunner:
     session_factory = get_session_factory()
+    ensure_system_state(session_factory)
     ledger = OperationsLedger(session_factory)
     missions = MissionService(session_factory, ledger)
     agents = AgentRegistry(session_factory)
