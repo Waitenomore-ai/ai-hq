@@ -1,0 +1,18 @@
+[Unit]
+Description=AI HQ Docker Compose stack
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/ai-hq/app
+Environment=AI_HQ_ENV_FILE=/etc/ai-hq/ai-hq.env
+ExecStart=/usr/bin/docker compose -p ai-hq --env-file /etc/ai-hq/ai-hq.env -f /opt/ai-hq/app/compose.yaml up -d
+ExecStop=/usr/bin/docker compose -p ai-hq --env-file /etc/ai-hq/ai-hq.env -f /opt/ai-hq/app/compose.yaml stop
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
