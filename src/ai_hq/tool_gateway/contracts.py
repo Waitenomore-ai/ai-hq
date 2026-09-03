@@ -5,6 +5,10 @@ from typing import Protocol
 from ai_hq.missions.models import MissionRisk
 
 
+class ToolAdapterError(RuntimeError):
+    """Expected operational failure from a registered tool adapter."""
+
+
 class ToolOutcomeState(StrEnum):
     BLOCKED = "blocked"
     WAITING_APPROVAL = "waiting_approval"
