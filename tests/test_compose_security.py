@@ -2,7 +2,6 @@ from pathlib import Path
 
 import yaml
 
-
 SOCKET_BIND = "/run/ai-hq/host-helper.sock:/run/ai-hq/host-helper.sock"
 
 
