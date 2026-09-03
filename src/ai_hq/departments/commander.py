@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from ai_hq.host_helper.contracts import HostCapability
 from ai_hq.missions.models import MissionRisk
