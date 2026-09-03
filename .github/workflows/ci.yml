@@ -17,7 +17,7 @@ jobs:
       - name: Lint
         run: python -m ruff check src tests
       - name: Test
-        run: timeout 90s python -m pytest -vv
+        run: timeout 90s python -m pytest -q
       - name: Validate Compose
         env:
           AI_HQ_DATABASE_URL: postgresql+psycopg://ai_hq:test@postgres:5432/ai_hq
