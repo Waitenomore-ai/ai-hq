@@ -31,7 +31,6 @@ def create_app(
     app = FastAPI(
         title="AI HQ",
         version="0.1.0",
-        root_path=settings.root_path if settings else "",
     )
 
     @app.get("/health/live")
