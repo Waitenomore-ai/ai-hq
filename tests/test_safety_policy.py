@@ -1,6 +1,7 @@
+from ai_hq.safety.policy import ActionIntent, Decision, evaluate_action
+
 from ai_hq.config import OperatingMode
 from ai_hq.missions.models import MissionRisk
-from ai_hq.safety.policy import ActionIntent, Decision, evaluate_action
 
 
 def intent(
