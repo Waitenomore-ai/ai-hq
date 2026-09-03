@@ -26,10 +26,15 @@ class ModelEndpoint:
 @dataclass(slots=True)
 class ModelRegistry:
     endpoints: list[ModelEndpoint] = field(default_factory=list)
+    _availability: dict[tuple[str, str], bool] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     def __init__(self, endpoints: Iterable[ModelEndpoint] = ()) -> None:
         self.endpoints = list(endpoints)
-        self._availability: dict[tuple[str, str], bool] = {}
+        self._availability = {}
 
     def set_availability(self, provider: str, model: str, available: bool) -> None:
         self._availability[(provider, model)] = available
