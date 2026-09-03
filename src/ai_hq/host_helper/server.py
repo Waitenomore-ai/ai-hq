@@ -124,7 +124,7 @@ class HostHelperServer:
 def _default_allow_lists() -> HostAllowLists:
     return HostAllowLists(
         services=frozenset({"ai-hq", "nginx", "dripvid"}),
-        containers=frozenset({"ai-hq-web", "ai-hq-worker", "dripvid"}),
+        containers=frozenset({"ai-hq-web", "ai-hq-worker"}),
         logs=frozenset({"ai-hq", "nginx", "dripvid"}),
     )
 
