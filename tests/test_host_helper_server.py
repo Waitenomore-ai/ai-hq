@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists
-from ai_hq.host_helper.server import MAX_REQUEST_BYTES, HostHelperServer
+from ai_hq.host_helper.server import MAX_REQUEST_BYTES, HostHelperServer, _default_allow_lists
 
 
 class FakeExecutor:
@@ -23,7 +23,7 @@ class FakeExecutor:
 def allow_lists() -> HostAllowLists:
     return HostAllowLists(
         services=frozenset({"ai-hq", "nginx", "dripvid"}),
-        containers=frozenset({"ai-hq-web", "ai-hq-worker", "dripvid"}),
+        containers=frozenset({"ai-hq-web", "ai-hq-worker"}),
         logs=frozenset({"ai-hq", "nginx", "dripvid"}),
     )
 
@@ -44,6 +44,15 @@ def exchange(server: HostHelperServer, payload: bytes) -> dict:
     thread.join(timeout=2)
     assert not thread.is_alive()
     return json.loads(response)
+
+
+def test_default_allow_lists_match_live_host_topology():
+    allow_lists = _default_allow_lists()
+
+    assert "dripvid" in allow_lists.services
+    assert "dripvid" in allow_lists.logs
+    assert "dripvid" not in allow_lists.containers
+    assert allow_lists.containers == frozenset({"ai-hq-web", "ai-hq-worker"})
 
 
 def test_missing_and_invalid_credentials_have_same_failure(
