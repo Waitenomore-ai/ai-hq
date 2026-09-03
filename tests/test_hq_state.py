@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from ai_hq.hq.state import HQStateService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -7,7 +8,6 @@ from sqlalchemy.pool import StaticPool
 from ai_hq.agents.models import Agent, AgentStatus
 from ai_hq.approvals.models import ApprovalRequest, ApprovalState
 from ai_hq.db import Base
-from ai_hq.hq.state import HQStateService
 from ai_hq.knowledge.models import (
     KnowledgeMemory,
     MemoryCategory,
