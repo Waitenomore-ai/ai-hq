@@ -16,10 +16,10 @@ def run_worker() -> int:
         return 0
 
     # Mission consumption is introduced in the Mission Engine slice.
-    # For now the worker proves connectivity and respects the global safety gate.
+    # For now the worker proves connectivity and remains resident while
+    # respecting the global Freeze safety gate.
     while execution_allowed(settings.operating_mode):
         time.sleep(5)
-        break
     return 0
 
 
