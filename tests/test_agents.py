@@ -35,3 +35,23 @@ def test_phase1_agents_start_idle_without_sensitive_permissions():
     sysadmin = registry.get_by_key("sysadmin")
     assert "arbitrary_root_shell" not in sysadmin.capabilities
     assert "docker_socket" not in sysadmin.capabilities
+
+
+def test_reset_working_clears_only_stale_requested_agents():
+    registry = build_registry()
+    registry.ensure_phase1_agents()
+    registry.set_state(
+        "commander", AgentStatus.WORKING, current_mission_id="mission-1"
+    )
+    registry.set_state(
+        "sysadmin", AgentStatus.IDLE, current_mission_id=None
+    )
+
+    reset = registry.reset_working(("commander", "sysadmin"))
+
+    assert [agent.key for agent in reset] == ["commander"]
+    commander = registry.get_by_key("commander")
+    sysadmin = registry.get_by_key("sysadmin")
+    assert commander.status is AgentStatus.IDLE
+    assert commander.current_mission_id is None
+    assert sysadmin.status is AgentStatus.IDLE
