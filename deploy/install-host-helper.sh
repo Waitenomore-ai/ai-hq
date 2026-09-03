@@ -20,7 +20,7 @@ UNIT_SOURCE="$SCRIPT_DIR/ai-hq-host-helper.service"
 UNIT_TARGET=/etc/systemd/system/ai-hq-host-helper.service
 SOCKET=/run/ai-hq/host-helper.sock
 
-for command in python3 systemctl install id grep sed; do
+for command in python3 systemctl install id grep sed runuser; do
   command -v "$command" >/dev/null || fail "$command is required"
 done
 
@@ -69,10 +69,16 @@ chmod 600 "$ai_tmp"
 install -m 0600 "$helper_tmp" "$HELPER_ENV"
 install -m 0600 "$ai_tmp" "$AI_ENV"
 
+# Secret creation above is intentionally restrictive. Restore normal creation
+# permissions before building the runtime used by the unprivileged helper user.
+umask 022
 install -d -m 0755 "$BASE"
 rm -rf "$VENV"
 python3 -m venv "$VENV"
 "$VENV/bin/python" -m pip install --disable-pip-version-check --no-cache-dir "$SOURCE_ROOT" >/dev/null
+chown -R root:ai-hq-helper "$VENV"
+chmod -R u+rwX,g+rX,o-rwx "$VENV"
+runuser -u ai-hq-helper -- "$VENV/bin/python" -c 'import ai_hq.host_helper.server' >/dev/null
 
 install -m 0644 "$UNIT_SOURCE" "$UNIT_TARGET"
 systemctl daemon-reload
