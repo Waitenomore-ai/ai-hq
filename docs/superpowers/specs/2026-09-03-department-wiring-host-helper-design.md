@@ -15,7 +15,7 @@ This phase must preserve the existing Approval & Safety Engine, Operations Ledge
 This phase includes:
 
 - Commander mission routing to SysAdmin.
-- A host-side helper service with a small authenticated API.
+- A host-side helper service with a small authenticated API over a Unix domain socket.
 - Read-only SysAdmin capabilities for host health, resources, selected services, selected containers, and bounded recent logs.
 - Safety Engine evaluation before helper invocation.
 - Operations Ledger records for proposed actions, permission/risk decisions, execution results, and failures.
@@ -75,7 +75,7 @@ All capabilities are read-only in this phase.
 
 ### Host Helper
 
-The Host Helper runs outside the AI HQ containers and exposes a small authenticated API. It is not a general-purpose remote shell.
+The Host Helper runs outside the AI HQ containers and exposes a small authenticated API over a Unix domain socket. It is not a general-purpose remote shell.
 
 The helper must:
 
@@ -85,17 +85,34 @@ The helper must:
 - Apply hard timeouts.
 - Apply response-size and log-line limits.
 - Reject unknown services, containers, units, files, paths, flags, and command fragments.
-- Bind only to an interface reachable from the AI HQ host/control path and not expose a public internet listener.
-- Authenticate every request using a separate service credential.
+- Listen only on a dedicated Unix domain socket under a controlled runtime path such as `/run/ai-hq-host-helper/helper.sock`.
+- Authenticate every request using a separate service credential even though transport is local.
 - Never return environment files, secrets files, credential material, or unrestricted process environments.
 
 The helper must not expose:
 
+- A TCP listener.
 - An arbitrary command endpoint.
 - A raw Docker API proxy.
 - A generic file-read endpoint.
 - A generic systemd action endpoint.
 - A generic log-file path argument.
+
+## Worker-Only Transport Boundary
+
+Only the AI HQ worker receives the helper socket mount. The web container does not receive it.
+
+The intended Compose boundary is conceptually:
+
+- host helper creates `/run/ai-hq-host-helper/helper.sock`
+- worker mounts only that socket/runtime directory at a fixed in-container path
+- web has no helper socket mount
+- neither web nor worker mounts `/var/run/docker.sock`
+- neither web nor worker runs privileged
+
+Socket filesystem ownership/mode must allow the dedicated AI HQ worker process to connect while denying unrelated local users where practical.
+
+The helper credential remains required in addition to socket permissions so possession of the path alone is insufficient authorization.
 
 ## Capability Contracts
 
@@ -178,9 +195,9 @@ The helper uses a dedicated credential separate from:
 
 The helper credential is stored in the AI HQ production secret/env layer and in the helper's root-readable configuration. It must never be written into mission payloads, ledger details, UI state, logs, or browser responses.
 
-Requests should use a simple authenticated service-to-service scheme suitable for local host deployment, with constant-time credential comparison and rejection of missing/invalid credentials.
+Requests use an authenticated service-to-service scheme over the Unix socket, with constant-time credential comparison and rejection of missing/invalid credentials.
 
-The helper must not be publicly reachable through Nginx or the `/ai-hq` web route.
+The helper has no public Nginx route and no TCP listener.
 
 ## Allow-list Configuration
 
@@ -200,7 +217,7 @@ Adding a new target is an administrative code/configuration change, not a browse
 
 Commander routing in this phase is deterministic and capability-based rather than LLM-dependent.
 
-A mission is eligible for SysAdmin routing when it requests one of the supported host-observability intents. The first implementation should use explicit intent/capability mapping rather than free-form model interpretation.
+A mission is eligible for SysAdmin routing when it requests one of the supported host-observability intents. The first implementation uses explicit intent/capability mapping rather than free-form model interpretation.
 
 Examples:
 
@@ -234,7 +251,8 @@ The HQ room projection continues to derive from durable mission/agent records.
 
 The following all fail closed:
 
-- helper unreachable
+- helper unavailable
+- socket missing or inaccessible
 - authentication failure
 - timeout
 - malformed helper response
@@ -287,17 +305,19 @@ A later phase may add explicit operator controls after a separate design and app
 
 ## Deployment
 
-The Host Helper is deployed separately from the AI HQ Docker Compose stack so AI HQ containers never require privileged Docker/host mounts.
+The Host Helper is deployed separately from the AI HQ Docker Compose stack so AI HQ containers never require privileged Docker/host access.
 
 Intended production characteristics:
 
 - dedicated host-side service definition
 - least-privilege runtime identity where practical
-- local/private bind only
+- Unix domain socket under `/run/ai-hq-host-helper/`
+- worker-only socket/runtime-directory mount
 - root-readable credential/configuration where required
 - explicit allow-list configuration
+- no TCP listener
 - no public Nginx route
-- health endpoint suitable for local smoke checks
+- local helper health check through the socket
 
 AI HQ keeps its current isolated Compose stack and localhost web binding.
 
@@ -319,6 +339,7 @@ Required automated coverage includes:
 - rejects malformed parameters
 - enforces output/log bounds
 - returns structured responses for each supported capability
+- exposes no TCP listener contract
 - exposes no generic command or path endpoint
 
 ### AI HQ Tool Boundary
@@ -329,6 +350,8 @@ Required automated coverage includes:
 - Freeze Mode blocks helper execution
 - helper timeout/failure yields deterministic failure
 - helper secrets are never included in persisted results
+- web container has no helper socket
+- worker helper client uses only the configured Unix socket
 
 ### Commander/SysAdmin
 
@@ -348,6 +371,8 @@ Required automated coverage includes:
 ### Deployment Contract
 
 - helper has no public Nginx route
+- helper has no TCP listener
+- helper socket is mounted only into worker
 - AI HQ Compose does not mount Docker socket
 - AI HQ Compose does not grant privileged mode
 - production smoke checks confirm AI HQ, helper local health, and DripVid root
@@ -357,13 +382,15 @@ Required automated coverage includes:
 The phase is complete only when all of the following are true:
 
 - Exact-head CI passes lint, full tests, and Compose validation.
-- Host Helper is deployed with a private/local bind and separate credential.
+- Host Helper is deployed with a Unix domain socket and separate credential.
+- Only the AI HQ worker receives the helper socket mount.
 - AI HQ can execute at least one real read-only SysAdmin capability through the full safety path.
 - Operations Ledger records the action chain without secrets.
 - HQ SysAdmin room reflects the mission activity truthfully.
 - Unknown capability/target tests prove fail-closed behavior.
 - No Docker socket is mounted into AI HQ.
 - No arbitrary shell endpoint exists.
+- No helper TCP listener exists.
 - DripVid production smoke check passes unchanged.
 
 ## Future Work
