@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from redis import Redis
 
+from ai_hq.approvals.api import install_approval_routes
 from ai_hq.config import Settings, get_settings
 from ai_hq.db import get_session_factory
 from ai_hq.health import database_probe as default_database_probe
@@ -50,6 +51,11 @@ def create_app(
             redis_client=redis_connection,
         )
         install_mission_routes(
+            app,
+            settings=settings,
+            session_factory=factory,
+        )
+        install_approval_routes(
             app,
             settings=settings,
             session_factory=factory,
