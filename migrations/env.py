@@ -7,6 +7,7 @@ from ai_hq.models import (  # noqa: F401
     AdminSession,
     Agent,
     ApprovalRequest,
+    KnowledgeMemory,
     LedgerEvent,
     Mission,
     ScopedApprovalRule,
