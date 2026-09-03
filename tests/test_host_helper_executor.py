@@ -10,7 +10,7 @@ from ai_hq.host_helper.executor import MAX_RESPONSE_BYTES, CompletedCommand, Hos
 def allow_lists() -> HostAllowLists:
     return HostAllowLists(
         services=frozenset({"ai-hq", "nginx", "dripvid"}),
-        containers=frozenset({"ai-hq-web", "ai-hq-worker", "dripvid"}),
+        containers=frozenset({"ai-hq-web", "ai-hq-worker"}),
         logs=frozenset({"ai-hq", "nginx", "dripvid"}),
     )
 
@@ -69,6 +69,19 @@ def test_container_status_uses_fixed_docker_name(allow_lists: HostAllowLists):
     assert response.ok is True
     assert runner.calls[0][0] == argv
     assert response.data == {"status": "running", "health": "healthy"}
+
+
+def test_dripvid_is_not_exposed_as_container_target(allow_lists: HostAllowLists):
+    runner = FakeRunner({})
+    executor = HostExecutor(allow_lists, command_runner=runner)
+
+    response = executor.execute(
+        HelperRequest(HostCapability.CONTAINER_STATUS, "dripvid", {})
+    )
+
+    assert response.ok is False
+    assert response.error == "unknown target"
+    assert runner.calls == []
 
 
 def test_logs_recent_uses_bounded_fixed_journal_target_and_redacts_secrets(
