@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -95,7 +95,7 @@ def test_commander_working_state_is_durable_and_clears_after_routing():
     assert rooms["commander"]["mission_title"] == "Is Nginx running?"
 
     with sessions() as db:
-        commander = db.get(Agent, "commander")
+        commander = db.scalar(select(Agent).where(Agent.key == "commander"))
         commander.status = AgentStatus.IDLE
         commander.current_mission_id = None
         db.commit()
@@ -117,13 +117,14 @@ def test_sysadmin_completed_mission_projects_idle_after_agent_cleanup():
         )
         db.add(mission)
         db.flush()
+        mission_id = mission.id
         db.add(
             Agent(
                 key="sysadmin",
                 display_name="SysAdmin",
                 role="Infrastructure",
                 status=AgentStatus.WORKING,
-                current_mission_id=mission.id,
+                current_mission_id=mission_id,
             )
         )
         db.commit()
@@ -134,8 +135,8 @@ def test_sysadmin_completed_mission_projects_idle_after_agent_cleanup():
     assert rooms["sysadmin"]["mission_title"] == "Check AI HQ health"
 
     with sessions() as db:
-        mission = db.get(Mission, mission.id)
-        sysadmin = db.get(Agent, "sysadmin")
+        mission = db.get(Mission, mission_id)
+        sysadmin = db.scalar(select(Agent).where(Agent.key == "sysadmin"))
         mission.status = MissionStatus.COMPLETED
         sysadmin.status = AgentStatus.IDLE
         sysadmin.current_mission_id = None
