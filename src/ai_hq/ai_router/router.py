@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -28,12 +29,20 @@ class ModelRouter:
         *,
         allow_paid: bool = False,
         prefer_local: bool = True,
+        budget_check: Callable[[float], tuple[bool, str]] | None = None,
     ) -> None:
         self.registry = registry
         self.allow_paid = allow_paid
         self.prefer_local = prefer_local
+        self.budget_check = budget_check
 
-    def route(self, capability: CapabilityClass) -> RouteDecision:
+    def route(
+        self,
+        capability: CapabilityClass,
+        *,
+        estimated_input_tokens: int = 0,
+        estimated_output_tokens: int = 0,
+    ) -> RouteDecision:
         candidates = self.registry.candidates_for(capability)
         considered = len(candidates)
 
@@ -54,7 +63,7 @@ class ModelRouter:
                 candidates_considered=considered,
             )
 
-        selected = min(
+        ordered = sorted(
             candidates,
             key=lambda endpoint: (
                 0
@@ -65,8 +74,25 @@ class ModelRouter:
                 endpoint.model,
             ),
         )
+        last_denial_reason = "no_available_model"
+        for endpoint in ordered:
+            estimated_cost = (
+                estimated_input_tokens / 1_000_000 * endpoint.input_cost_per_million
+                + estimated_output_tokens / 1_000_000 * endpoint.output_cost_per_million
+            )
+            if self.budget_check is not None:
+                allowed, reason = self.budget_check(estimated_cost)
+                if not allowed:
+                    last_denial_reason = reason
+                    continue
+            return RouteDecision(
+                endpoint=endpoint,
+                reason="selected",
+                candidates_considered=considered,
+            )
+
         return RouteDecision(
-            endpoint=selected,
-            reason="selected",
+            endpoint=None,
+            reason=last_denial_reason,
             candidates_considered=considered,
         )
