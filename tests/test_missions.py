@@ -72,3 +72,29 @@ def test_failed_transition_persists_error_state():
     failed = service.transition(mission.id, MissionStatus.FAILED, error_state={"code": "probe_failed"})
     assert failed.status is MissionStatus.FAILED
     assert failed.error_state == {"code": "probe_failed"}
+
+
+def test_running_missions_returns_only_running_in_stable_order():
+    service, _ = build_service()
+    first = service.create_mission(
+        title="first", description="", owner_agent="commander", source="test"
+    )
+    second = service.create_mission(
+        title="second", description="", owner_agent="commander", source="test"
+    )
+    service.transition(first.id, MissionStatus.RUNNING)
+
+    running = service.running_missions()
+
+    assert [mission.id for mission in running] == [first.id]
+    assert service.has_running() is True
+    assert second.status is MissionStatus.QUEUED
+
+
+def test_has_running_is_false_when_no_mission_is_running():
+    service, _ = build_service()
+    service.create_mission(
+        title="queued", description="", owner_agent="commander", source="test"
+    )
+
+    assert service.has_running() is False
