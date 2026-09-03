@@ -4,8 +4,8 @@ import threading
 from pathlib import Path
 
 import pytest
-from ai_hq.host_helper.client import MAX_RESPONSE_BYTES, HostHelperClient, HostHelperError
 
+from ai_hq.host_helper.client import MAX_RESPONSE_BYTES, HostHelperClient, HostHelperError
 from ai_hq.host_helper.contracts import HelperRequest, HostCapability
 
 
