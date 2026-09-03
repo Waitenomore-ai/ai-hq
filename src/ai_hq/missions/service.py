@@ -111,6 +111,27 @@ class MissionService:
                 .limit(1)
             )
 
+    def running_missions(self) -> list[Mission]:
+        with self.session_factory() as db:
+            return list(
+                db.scalars(
+                    select(Mission)
+                    .where(Mission.status == MissionStatus.RUNNING)
+                    .order_by(Mission.created_at, Mission.id)
+                )
+            )
+
+    def has_running(self) -> bool:
+        with self.session_factory() as db:
+            return (
+                db.scalar(
+                    select(Mission.id)
+                    .where(Mission.status == MissionStatus.RUNNING)
+                    .limit(1)
+                )
+                is not None
+            )
+
     def assign_owner(self, mission_id: str, owner_agent: str) -> Mission:
         with self.session_factory() as db:
             mission = db.get(Mission, mission_id)
