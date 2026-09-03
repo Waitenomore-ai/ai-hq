@@ -1,9 +1,9 @@
+from ai_hq.agents.models import AgentStatus
+from ai_hq.agents.registry import AgentRegistry
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ai_hq.agents.models import AgentStatus
-from ai_hq.agents.registry import AgentRegistry
 from ai_hq.db import Base
 
 
