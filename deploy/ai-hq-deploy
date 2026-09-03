@@ -27,6 +27,8 @@ grep -Eq '^AI_HQ_ADMIN_PASSWORD_HASH=.+$' "$ENV_FILE" || fail "AI HQ admin passw
 grep -Eq '^AI_HQ_SESSION_SECRET=.{32,}$' "$ENV_FILE" || fail "AI HQ session secret is missing or too short"
 grep -Eq '^AI_HQ_OPERATING_MODE=safe$' "$ENV_FILE" || fail "AI HQ must deploy in safe mode"
 grep -Eq '^AI_HQ_SIMULATION_MODE=true$' "$ENV_FILE" || fail "AI HQ must deploy with simulation mode enabled"
+grep -Eq '^AI_HQ_HOST_HELPER_CREDENTIAL=[A-Za-z0-9_-]{32,128}$' "$ENV_FILE" || fail "Host Helper credential is missing; run deploy/install-host-helper.sh first"
+test -S /run/ai-hq/host-helper.sock || fail "Host Helper socket is missing; run deploy/install-host-helper.sh first"
 
 nginx -t >/dev/null
 
