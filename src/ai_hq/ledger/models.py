@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ai_hq.db import Base
@@ -22,7 +22,10 @@ class LedgerEventType(StrEnum):
 class LedgerEvent(Base):
     __tablename__ = "operations_ledger"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(
+        String(36), unique=True, nullable=False, default=lambda: str(uuid4()), index=True
+    )
     mission_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("missions.id"), nullable=False, index=True
     )
