@@ -51,7 +51,7 @@ class HostHelperClient:
                 raw = self._read_response(connection)
         except HostHelperError:
             raise
-        except (OSError, socket.timeout):
+        except (TimeoutError, OSError):
             raise HostHelperError("connection_failed") from None
 
         try:
