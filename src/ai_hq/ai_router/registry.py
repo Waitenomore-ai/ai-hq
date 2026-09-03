@@ -18,6 +18,7 @@ class ModelEndpoint:
     priority: int = 100
     provider_kind: ProviderKind = ProviderKind.CLOUD
     enabled: bool = True
+    requires_payment: bool = False
     input_cost_per_million: float = 0.0
     output_cost_per_million: float = 0.0
 
