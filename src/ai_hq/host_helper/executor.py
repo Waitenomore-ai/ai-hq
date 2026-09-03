@@ -1,9 +1,9 @@
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Callable
 
 from ai_hq.host_helper.contracts import (
     HelperRequest,
@@ -89,15 +89,6 @@ class HostExecutor:
     ):
         self.allow_lists = allow_lists
         self.command_runner = command_runner
-
-    def _run(self, argv: list[str]) -> CompletedCommand | HelperResponse:
-        try:
-            result = self.command_runner(argv, COMMAND_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired:
-            return HelperResponse(False, HostCapability.HOST_HEALTH, None, {}, "timeout")
-        except (OSError, subprocess.SubprocessError):
-            return HelperResponse(False, HostCapability.HOST_HEALTH, None, {}, "command_failed")
-        return result
 
     @staticmethod
     def _failure(request: HelperRequest, error: str) -> HelperResponse:
