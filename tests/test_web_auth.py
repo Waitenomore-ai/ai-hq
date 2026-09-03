@@ -8,6 +8,7 @@ from ai_hq.app import create_app
 from ai_hq.config import Settings
 from ai_hq.db import Base
 from ai_hq.models.admin_session import AdminSession
+from ai_hq.models.system_state import SystemState
 
 
 class FakeRedis:
@@ -92,6 +93,27 @@ def test_successful_login_sets_secure_scoped_cookie_and_unlocks_home():
     home = client.get("/", headers=proxied_auth_headers(client), follow_redirects=False)
     assert home.status_code == 200
     assert "Authenticated administrator session." in home.text
+
+
+def test_home_renders_durable_runtime_simulation_state():
+    client, factory = build_client()
+    login = client.post(
+        "/login",
+        data={"password": "separate-ai-hq-password"},
+        headers={"Origin": "https://testserver"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+
+    with factory() as db:
+        db.add(SystemState(id=1, operating_mode="safe", simulation_mode=False))
+        db.commit()
+
+    home = client.get("/", headers=proxied_auth_headers(client), follow_redirects=False)
+    assert home.status_code == 200
+    assert "Safe Mode" in home.text
+    assert "Simulation Off" in home.text
+    assert "Simulation On" not in home.text
 
 
 def test_bad_password_is_generic_and_does_not_authenticate():
