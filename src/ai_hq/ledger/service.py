@@ -40,6 +40,6 @@ class OperationsLedger:
                 db.scalars(
                     select(LedgerEvent)
                     .where(LedgerEvent.mission_id == mission_id)
-                    .order_by(LedgerEvent.created_at, LedgerEvent.id)
+                    .order_by(LedgerEvent.sequence)
                 )
             )
