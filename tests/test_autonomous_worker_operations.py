@@ -126,3 +126,53 @@ def test_worker_iteration_reports_idle_when_neither_path_has_work():
     assert result is False
     assert autonomous.calls == 1
     assert legacy.calls == 1
+
+def test_autonomous_worker_registers_read_only_operational_capabilities():
+    class FakeSettings:
+        host_helper_credential = "test-credential"
+        host_helper_socket = "/tmp/test-host-helper.sock"
+
+    runner = worker.build_autonomous_mission_runner(
+        FakeSettings(),
+        session_factory=isolated_session_factory(),
+    )
+
+    registry = runner.executor.gateway.registry
+
+    assert registry.resolve("system.health.read") is not None
+    assert registry.resolve("service.status.read") is not None
+    assert registry.resolve("service.logs.read") is not None
+
+
+def test_autonomous_worker_keeps_mutating_operations_unregistered():
+    class FakeSettings:
+        host_helper_credential = "test-credential"
+        host_helper_socket = "/tmp/test-host-helper.sock"
+
+    runner = worker.build_autonomous_mission_runner(
+        FakeSettings(),
+        session_factory=isolated_session_factory(),
+    )
+
+    registry = runner.executor.gateway.registry
+
+    assert registry.resolve("service.restart") is None
+    assert registry.resolve("deployment.deploy") is None
+    assert registry.resolve("deployment.rollback") is None
+
+
+def test_autonomous_worker_stays_fail_closed_without_host_helper_credential():
+    class FakeSettings:
+        host_helper_credential = None
+        host_helper_socket = "/tmp/test-host-helper.sock"
+
+    runner = worker.build_autonomous_mission_runner(
+        FakeSettings(),
+        session_factory=isolated_session_factory(),
+    )
+
+    registry = runner.executor.gateway.registry
+
+    assert registry.resolve("system.health.read") is None
+    assert registry.resolve("service.status.read") is None
+    assert registry.resolve("service.logs.read") is None
