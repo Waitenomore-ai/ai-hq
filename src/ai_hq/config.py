@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     host_helper_socket: str = "/run/ai-hq/host-helper.sock"
     host_helper_credential: str | None = None
 
+    # Provider-independent SysAdmin chat model boundary.
+    # The configured endpoint must expose an OpenAI-compatible
+    # /chat/completions API. API keys remain environment-only.
+    chat_model_base_url: str | None = None
+    chat_model_name: str | None = None
+    chat_model_api_key: str | None = None
+    chat_model_timeout_seconds: float = 15.0
+
     @property
     def is_production(self) -> bool:
         return self.environment.casefold() == "production"
