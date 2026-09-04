@@ -64,7 +64,7 @@ class MissionExecutor:
                     step_status=waiting.status,
                 )
 
-        step = self.missions.next_pending_step(mission.id)
+        step = self.missions.claim_next_pending_step(mission.id)
 
         if step is None:
             if self.missions.plan_is_complete(mission.id):
@@ -89,11 +89,6 @@ class MissionExecutor:
                 mission.id,
                 MissionStatus.RUNNING,
             )
-
-        step = self.missions.transition_step(
-            step.id,
-            MissionStepStatus.RUNNING,
-        )
 
         request = self._request_for(mission, step)
         outcome = self.gateway.execute(request)

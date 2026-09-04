@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ai_hq.ledger.models import LedgerEventType
@@ -192,6 +192,52 @@ class MissionService:
                 .order_by(MissionStep.position, MissionStep.id)
                 .limit(1)
             )
+
+    def claim_next_pending_step(
+        self,
+        mission_id: str,
+    ) -> MissionStep | None:
+        """
+        Atomically claim only the mission's first incomplete step.
+
+        A later step must never become runnable while an earlier step is
+        RUNNING, WAITING_APPROVAL, FAILED, or otherwise incomplete.
+        The conditional UPDATE prevents two workers from claiming the same
+        pending step.
+        """
+        with self.session_factory() as db:
+            first_incomplete_id = db.scalar(
+                select(MissionStep.id)
+                .where(
+                    MissionStep.mission_id == mission_id,
+                    MissionStep.status != MissionStepStatus.SUCCEEDED,
+                )
+                .order_by(
+                    MissionStep.position,
+                    MissionStep.id,
+                )
+                .limit(1)
+            )
+
+            if first_incomplete_id is None:
+                return None
+
+            claimed = db.execute(
+                update(MissionStep)
+                .where(
+                    MissionStep.id == first_incomplete_id,
+                    MissionStep.status == MissionStepStatus.PENDING,
+                )
+                .values(status=MissionStepStatus.RUNNING)
+            )
+
+            if claimed.rowcount != 1:
+                db.rollback()
+                return None
+
+            db.commit()
+            return db.get(MissionStep, first_incomplete_id)
+
 
     def transition_step(
         self,

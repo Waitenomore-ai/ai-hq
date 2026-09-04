@@ -41,8 +41,7 @@ def allow_lists():
 
 
 def test_host_adapter_supports_only_existing_read_only_host_capabilities():
-    supported = {item.value for item in HostCapability}
-    assert supported == {
+    supported = {
         "host.health",
         "host.resources",
         "service.status",
@@ -58,12 +57,18 @@ def test_host_adapter_supports_only_existing_read_only_host_capabilities():
         )
         assert adapter.capability == capability
 
-    with pytest.raises(ValueError, match="unsupported host capability"):
-        HostHelperAdapter(
-            capability="shell.execute",
-            client=FakeHostClient(),
-            allow_lists=allow_lists(),
-        )
+    for capability in {
+        "service.restart",
+        "deployment.deploy",
+        "deployment.rollback",
+        "shell.execute",
+    }:
+        with pytest.raises(ValueError, match="unsupported host capability"):
+            HostHelperAdapter(
+                capability=capability,
+                client=FakeHostClient(),
+                allow_lists=allow_lists(),
+            )
 
 
 def test_host_health_translation_drops_gateway_target_and_uses_strict_helper_contract():

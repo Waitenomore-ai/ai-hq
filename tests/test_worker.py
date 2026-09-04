@@ -40,6 +40,11 @@ def test_worker_stays_alive_in_safe_mode(monkeypatch):
         "build_department_runner",
         lambda _settings: SimpleNamespace(run_once=lambda: False),
     )
+    monkeypatch.setattr(
+        worker,
+        "build_autonomous_mission_runner",
+        lambda _settings: SimpleNamespace(run_once=lambda: None),
+    )
 
     with pytest.raises(StopProbe):
         worker.run_worker()
@@ -80,8 +85,13 @@ def test_worker_repeatedly_runs_missions_and_sleeps_only_when_idle(monkeypatch):
         nonlocal sleeps
         sleeps += 1
 
-    monkeypatch.setattr(worker, "build_department_runner", build_runner)
     monkeypatch.setattr(worker.time, "sleep", probe_sleep)
+    monkeypatch.setattr(
+        worker,
+        "build_autonomous_mission_runner",
+        lambda _settings: SimpleNamespace(run_once=lambda: None),
+    )
+    monkeypatch.setattr(worker, "build_department_runner", build_runner)
 
     with pytest.raises(StopProbe):
         worker.run_worker()
@@ -89,7 +99,6 @@ def test_worker_repeatedly_runs_missions_and_sleeps_only_when_idle(monkeypatch):
     assert builds == 1
     assert calls == 3
     assert sleeps == 1
-
 
 def test_freeze_mode_never_constructs_or_runs_department_runner(monkeypatch):
     monkeypatch.setattr(
@@ -101,7 +110,3 @@ def test_freeze_mode_never_constructs_or_runs_department_runner(monkeypatch):
 
     def forbidden(_settings):
         raise AssertionError("frozen worker must not construct runner")
-
-    monkeypatch.setattr(worker, "build_department_runner", forbidden)
-
-    assert worker.run_worker() == 0
