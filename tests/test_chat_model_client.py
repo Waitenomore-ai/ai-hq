@@ -410,3 +410,40 @@ def test_huggingface_requires_explicit_model():
         match="FREE_AI_HF_MODEL",
     ):
         build_chat_model_client(settings)
+
+
+def test_openrouter_free_model_identifier_cannot_be_configured():
+    from ai_hq.chat.free_model_router import FreeModelRouter
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_openrouter_api_key="openrouter-secret",
+    )
+
+    assert not hasattr(settings, "free_ai_openrouter_model")
+
+    client = build_chat_model_client(settings)
+
+    assert isinstance(client, FreeModelRouter)
+    assert client.providers[0].client.model == "openrouter/free"
+
+
+def test_no_paid_free_ai_setting_exists():
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+    )
+
+    forbidden = [
+        "free_ai_allow_paid",
+        "free_ai_paid_fallback",
+        "free_ai_enable_billing",
+        "free_ai_fallback_to_paid",
+    ]
+
+    for name in forbidden:
+        assert not hasattr(settings, name)

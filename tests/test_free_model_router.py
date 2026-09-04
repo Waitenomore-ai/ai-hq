@@ -161,3 +161,131 @@ def test_paid_or_unknown_policy_is_rejected(policy):
             client=StubClient(result="should never run"),
             zero_cost_policy=policy,
         )
+
+
+def test_provider_collection_is_immutable():
+    client = StubClient(result="reply")
+    router = FreeModelRouter([provider("openrouter", client)])
+
+    assert isinstance(router.providers, tuple)
+
+    with pytest.raises(AttributeError):
+        router.providers.append(provider("paid", client))
+
+
+def test_provider_policy_cannot_be_changed_after_creation():
+    item = provider("openrouter", StubClient(result="reply"))
+
+    with pytest.raises(Exception):
+        item.zero_cost_policy = "paid"
+
+
+def test_router_never_uses_raw_provider_error_in_aggregate_failure():
+    sensitive_values = [
+        "sk-secret-openrouter-key",
+        "gsk_secret_groq_key",
+        "hf_secret_token",
+        "Bearer super-secret",
+        "https://user:password@example.invalid",
+    ]
+
+    providers = []
+
+    for index, secret in enumerate(sensitive_values):
+        providers.append(
+            provider(
+                f"provider-{index}",
+                StubClient(
+                    error=ChatModelError(
+                        f"request failed: {secret}"
+                    )
+                ),
+            )
+        )
+
+    router = FreeModelRouter(providers)
+
+    with pytest.raises(ChatModelError) as exc_info:
+        router.reply(
+            "System",
+            [{"role": "user", "content": "Hello"}],
+        )
+
+    message = str(exc_info.value)
+
+    for secret in sensitive_values:
+        assert secret not in message
+
+    for index in range(len(sensitive_values)):
+        assert f"provider-{index}" in message
+
+
+def test_router_does_not_retry_provider_with_different_model():
+    calls = []
+
+    class ModelRecordingClient:
+        model = "openrouter/free"
+
+        def reply(self, system_prompt, messages):
+            calls.append(self.model)
+            raise ChatModelError("quota exhausted")
+
+    router = FreeModelRouter(
+        [
+            FreeModelProvider(
+                name="openrouter",
+                client=ModelRecordingClient(),
+                zero_cost_policy="explicitly_free",
+            )
+        ]
+    )
+
+    with pytest.raises(ChatModelError):
+        router.reply(
+            "System",
+            [{"role": "user", "content": "Hello"}],
+        )
+
+    assert calls == ["openrouter/free"]
+
+
+def test_router_rejects_empty_provider_list():
+    with pytest.raises(
+        ValueError,
+        match="at least one zero-cost provider",
+    ):
+        FreeModelRouter([])
+
+
+def test_only_documented_zero_cost_policies_are_accepted():
+    accepted = {
+        "local",
+        "explicitly_free",
+        "free_allowance",
+    }
+
+    for policy in accepted:
+        item = FreeModelProvider(
+            name=f"provider-{policy}",
+            client=StubClient(result="ok"),
+            zero_cost_policy=policy,
+        )
+        assert item.zero_cost_policy == policy
+
+    rejected = {
+        "paid",
+        "metered",
+        "cheapest",
+        "automatic",
+        "premium",
+        "fallback",
+        "",
+    }
+
+    for policy in rejected:
+        with pytest.raises(ValueError, match="zero-cost"):
+            FreeModelProvider(
+                name=f"provider-{policy or 'empty'}",
+                client=StubClient(result="never"),
+                zero_cost_policy=policy,
+            )
