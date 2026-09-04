@@ -141,6 +141,7 @@
 
 (() => {
   const panel = document.getElementById("sysadmin-chat");
+  const close = document.getElementById("sysadmin-chat-close");
   const messages = document.getElementById("sysadmin-chat-messages");
   const form = document.getElementById("sysadmin-chat-form");
   const input = document.getElementById("sysadmin-chat-input");
@@ -385,6 +386,10 @@
     setStatus("Ready");
   }
 
+  function closeSysAdminChat() {
+    panel.hidden = true;
+  }
+
   async function openSysAdminChat() {
     panel.hidden = false;
     setStatus("Loading…");
@@ -436,6 +441,10 @@
       form.requestSubmit();
     }
   });
+
+  if (close) {
+    close.addEventListener("click", closeSysAdminChat);
+  }
 
   document.addEventListener("click", (event) => {
     const room = event.target.closest(
