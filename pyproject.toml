@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Personal AI operations headquarters"
 requires-python = ">=3.12"
 dependencies = [
+  "httpx>=0.28,<1",
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.34,<1",
   "sqlalchemy>=2.0,<3",
@@ -27,7 +28,6 @@ ai-hq = "ai_hq.cli:main"
 dev = [
   "pytest>=8,<10",
   "pytest-asyncio>=0.25,<2",
-  "httpx>=0.28,<1",
   "pyyaml>=6,<7",
   "ruff>=0.9,<1",
 ]
