@@ -77,30 +77,38 @@ def test_logs_are_bounded_before_host_helper():
     helper = FakeHostHelper()
     transport = HostHelperOperationalTransport(helper)
 
-    transport.service_logs(target(), lines=200)
+    transport.service_logs(target(), lines=500)
 
     assert helper.requests[0] == HelperRequest(
         capability=HostCapability.LOGS_RECENT,
         target="dripvid",
-        params={"lines": 200},
+        params={"lines": 500},
     )
 
     with pytest.raises(ToolAdapterError, match="invalid_log_line_count"):
-        transport.service_logs(target(), lines=201)
+        transport.service_logs(target(), lines=501)
 
     assert len(helper.requests) == 1
 
 
-def test_restart_fails_closed_until_host_helper_restart_capability_exists():
+def test_restart_routes_through_host_helper_with_logical_target():
     helper = FakeHostHelper()
     transport = HostHelperOperationalTransport(helper)
+    target = OperationalTarget(
+        key="dripvid",
+        service_unit="dripvid.service",
+        allowed_capabilities=frozenset({"service.restart"}),
+    )
 
-    with pytest.raises(ToolAdapterError, match="restart_host_helper_unavailable"):
-        transport.service_restart(target())
+    result = transport.service_restart(target)
 
-    assert helper.requests == []
+    assert result == {}
+    assert len(helper.requests) == 1
 
-
+    request = helper.requests[0]
+    assert request.capability is HostCapability.SERVICE_RESTART
+    assert request.target == target.key
+    assert request.params == {}
 def test_operational_transport_contains_no_subprocess_execution():
     import inspect
     import ai_hq.operations.transport as module

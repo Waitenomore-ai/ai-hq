@@ -10,7 +10,7 @@ from ai_hq.operations.targets import OperationalTarget
 from ai_hq.tool_gateway.contracts import ToolAdapterError
 
 
-HOST_HELPER_MAX_LOG_LINES = 200
+HOST_HELPER_MAX_LOG_LINES = 500
 
 
 class HostHelperTransport(Protocol):
@@ -94,9 +94,50 @@ class HostHelperOperationalTransport:
         self,
         target: OperationalTarget,
     ) -> dict[str, object]:
-        # Restart becomes executable only after an explicit bounded
-        # Host Helper restart capability is implemented and approved.
-        raise ToolAdapterError("restart_host_helper_unavailable")
+        return self._execute(
+            HelperRequest(
+                capability=HostCapability.SERVICE_RESTART,
+                target=target.key,
+                params={},
+            )
+        )
+
+    def deployment_deploy(
+        self,
+        target: OperationalTarget,
+    ) -> dict[str, object]:
+        return self._execute(
+            HelperRequest(
+                capability=HostCapability.DEPLOYMENT_DEPLOY,
+                target=target.key,
+                params={},
+            )
+        )
+
+    def deployment_rollback(
+        self,
+        target: OperationalTarget,
+        release_id: str,
+    ) -> dict[str, object]:
+        if (
+            not isinstance(release_id, str)
+            or not release_id
+            or len(release_id) > 128
+            or not release_id.isascii()
+            or any(
+                not (char.isalnum() or char in "._-")
+                for char in release_id
+            )
+        ):
+            raise ToolAdapterError("invalid_release_id")
+
+        return self._execute(
+            HelperRequest(
+                capability=HostCapability.DEPLOYMENT_ROLLBACK,
+                target=target.key,
+                params={"release_id": release_id},
+            )
+        )
 
 
 # Compatibility name for code that imports the Stage 2 transport symbol.

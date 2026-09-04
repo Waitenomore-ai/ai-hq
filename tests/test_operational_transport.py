@@ -107,7 +107,7 @@ def test_service_status_uses_trusted_logical_target():
     ]
 
 
-@pytest.mark.parametrize("lines", [1, 100, 200])
+@pytest.mark.parametrize("lines", [1, 100, 500])
 def test_logs_accept_host_helper_bounded_line_counts(lines):
     helper = FakeHostHelper()
     transport = HostHelperOperationalTransport(helper)
@@ -122,7 +122,7 @@ def test_logs_accept_host_helper_bounded_line_counts(lines):
     )
 
 
-@pytest.mark.parametrize("lines", [0, 201, -1, True, "100"])
+@pytest.mark.parametrize("lines", [0, 501, -1, True, "100"])
 def test_logs_reject_values_outside_host_helper_contract(lines):
     helper = FakeHostHelper()
     transport = HostHelperOperationalTransport(helper)
@@ -149,14 +149,19 @@ def test_host_helper_connection_failure_fails_closed():
         transport.service_status(target())
 
 
-def test_restart_has_no_local_fallback():
+def test_restart_routes_only_through_host_helper():
     helper = FakeHostHelper()
     transport = HostHelperOperationalTransport(helper)
+    target = OperationalTarget(
+        key="dripvid",
+        service_unit="dripvid.service",
+        allowed_capabilities=frozenset({"service.restart"}),
+    )
 
-    with pytest.raises(
-        ToolAdapterError,
-        match="restart_host_helper_unavailable",
-    ):
-        transport.service_restart(target())
+    result = transport.service_restart(target)
 
-    assert helper.requests == []
+    assert result == {}
+    assert len(helper.requests) == 1
+    assert helper.requests[0].capability is HostCapability.SERVICE_RESTART
+    assert helper.requests[0].target == "dripvid"
+    assert helper.requests[0].params == {}

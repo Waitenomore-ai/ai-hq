@@ -12,11 +12,14 @@ def allow_lists() -> HostAllowLists:
     )
 
 
-def test_host_capabilities_are_exactly_the_read_only_set():
+def test_host_capabilities_are_exactly_the_controlled_set():
     assert {capability.value for capability in HostCapability} == {
         "host.health",
         "host.resources",
         "service.status",
+        "service.restart",
+        "deployment.deploy",
+        "deployment.rollback",
         "container.status",
         "logs.recent",
     }
@@ -70,7 +73,13 @@ def test_logs_recent_accepts_only_bounded_line_count(allow_lists: HostAllowLists
     assert request.target == "dripvid"
     assert request.params == {"lines": 100}
 
-    for lines in (0, 201, -1, "100", 1.5):
+    upper_bound = validate_request(
+        {"capability": "logs.recent", "target": "dripvid", "params": {"lines": 500}},
+        allow_lists,
+    )
+    assert upper_bound.params == {"lines": 500}
+
+    for lines in (0, 501, -1, "100", 1.5):
         with pytest.raises(ValueError, match="lines"):
             validate_request(
                 {"capability": "logs.recent", "target": "dripvid", "params": {"lines": lines}},

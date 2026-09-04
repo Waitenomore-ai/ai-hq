@@ -27,6 +27,18 @@ class HostHelperAdapter:
             self.host_capability = HostCapability(capability)
         except ValueError as exc:
             raise ValueError("unsupported host capability") from exc
+
+        read_only_capabilities = {
+            HostCapability.HOST_HEALTH,
+            HostCapability.HOST_RESOURCES,
+            HostCapability.SERVICE_STATUS,
+            HostCapability.CONTAINER_STATUS,
+            HostCapability.LOGS_RECENT,
+        }
+
+        if self.host_capability not in read_only_capabilities:
+            raise ValueError("unsupported host capability")
+
         self.capability = self.host_capability.value
         self.client = client
         self.allow_lists = allow_lists

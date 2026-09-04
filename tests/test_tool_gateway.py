@@ -227,3 +227,419 @@ def test_explicit_adapter_failure_returns_failed_and_records_safe_result_metadat
         "state": "failed",
     }
     assert secret_sentinel not in repr(result.event_data)
+
+
+class FakeRestartAdapter:
+    capability = "service.restart"
+
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, request: ToolRequest) -> dict[str, object]:
+        self.calls += 1
+        return {"restarted": request.target}
+
+
+def test_stage2_restart_requires_exact_permission():
+    adapter = FakeRestartAdapter()
+    gateway, adapter, mission = build_gateway(
+        permissions=["*"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    outcome = gateway.execute(
+        request(
+            mission.id,
+            capability="service.restart",
+            mutates_external_state=True,
+        )
+    )
+
+    assert outcome.state is ToolOutcomeState.BLOCKED
+    assert outcome.reason == "permission_denied"
+    assert adapter.calls == 0
+
+
+def test_stage2_restart_requires_approval_before_adapter():
+    adapter = FakeRestartAdapter()
+    gateway, adapter, mission = build_gateway(
+        permissions=["service.restart"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    proposed = request(
+        mission.id,
+        capability="service.restart",
+        mutates_external_state=True,
+    )
+
+    outcome = gateway.execute(proposed)
+
+    assert outcome.state is ToolOutcomeState.WAITING_APPROVAL
+    assert outcome.approval_request_id is not None
+    assert adapter.calls == 0
+
+
+def test_stage2_approved_restart_executes_once():
+    adapter = FakeRestartAdapter()
+    gateway, adapter, mission = build_gateway(
+        permissions=["service.restart"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    proposed = request(
+        mission.id,
+        capability="service.restart",
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(proposed)
+
+    assert waiting.state is ToolOutcomeState.WAITING_APPROVAL
+    assert adapter.calls == 0
+
+    gateway.safety.approvals.decide(
+        waiting.approval_request_id,
+        ApprovalState.APPROVED,
+    )
+
+    outcome = gateway.execute(proposed)
+
+    assert outcome.state is ToolOutcomeState.EXECUTED
+    assert outcome.result == {"restarted": "ai-hq"}
+    assert adapter.calls == 1
+
+
+def test_stage2_restart_simulation_never_calls_adapter():
+    adapter = FakeRestartAdapter()
+    gateway, adapter, mission = build_gateway(
+        permissions=["service.restart"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    proposed = request(
+        mission.id,
+        capability="service.restart",
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(proposed)
+
+    assert waiting.state is ToolOutcomeState.WAITING_APPROVAL
+    assert adapter.calls == 0
+
+    gateway.safety.approvals.decide(
+        waiting.approval_request_id,
+        ApprovalState.APPROVED,
+    )
+
+    with gateway.session_factory() as db:
+        state = db.get(SystemState, 1)
+        state.simulation_mode = True
+        db.commit()
+
+    outcome = gateway.execute(proposed)
+
+    assert outcome.state is ToolOutcomeState.SIMULATED
+    assert outcome.result == {"simulated": True}
+    assert adapter.calls == 0
+
+
+def test_stage2_restart_audit_chain_is_reconstructable():
+    adapter = FakeRestartAdapter()
+    gateway, adapter, mission = build_gateway(
+        permissions=["service.restart"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    proposed = request(
+        mission.id,
+        capability="service.restart",
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(proposed)
+
+    assert waiting.state is ToolOutcomeState.WAITING_APPROVAL
+    assert adapter.calls == 0
+
+    gateway.safety.approvals.decide(
+        waiting.approval_request_id,
+        ApprovalState.APPROVED,
+    )
+
+    outcome = gateway.execute(proposed)
+
+    assert outcome.state is ToolOutcomeState.EXECUTED
+    assert adapter.calls == 1
+
+    events = gateway.ledger.for_mission(mission.id)
+
+    event_types = [event.event_type for event in events]
+
+    assert LedgerEventType.ACTION_PROPOSED in event_types
+    assert LedgerEventType.PERMISSION_CHECKED in event_types
+    assert LedgerEventType.RISK_CHECKED in event_types
+    assert LedgerEventType.APPROVAL_RECORDED in event_types
+    assert LedgerEventType.TOOL_EXECUTED in event_types
+    assert LedgerEventType.RESULT_RECORDED in event_types
+
+    proposed_events = [
+        event
+        for event in events
+        if event.event_type is LedgerEventType.ACTION_PROPOSED
+    ]
+
+    assert proposed_events[-1].event_data["action"] == "service.restart"
+    assert proposed_events[-1].event_data["target"] == "ai-hq"
+    assert proposed_events[-1].agent_key == "sysadmin"
+
+    sequences = [event.sequence for event in events]
+    assert sequences == sorted(sequences)
+
+
+def test_stage2_operational_audit_does_not_store_request_secrets():
+    adapter = FakeRestartAdapter()
+    gateway, adapter, mission = build_gateway(
+        permissions=["service.restart"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    secret = "STAGE2_SECRET_MUST_NOT_ENTER_LEDGER"
+
+    proposed = request(
+        mission.id,
+        capability="service.restart",
+        params={"secret": secret},
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(proposed)
+
+    assert waiting.state is ToolOutcomeState.WAITING_APPROVAL
+    assert adapter.calls == 0
+
+    events = gateway.ledger.for_mission(mission.id)
+
+    assert secret not in repr(
+        [event.event_data for event in events]
+    )
+
+
+def test_stage2_simulation_is_visible_in_audit_result():
+    adapter = FakeRestartAdapter()
+    gateway, adapter, mission = build_gateway(
+        permissions=["service.restart"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    proposed = request(
+        mission.id,
+        capability="service.restart",
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(proposed)
+
+    gateway.safety.approvals.decide(
+        waiting.approval_request_id,
+        ApprovalState.APPROVED,
+    )
+
+    with gateway.session_factory() as db:
+        state = db.get(SystemState, 1)
+        state.simulation_mode = True
+        db.commit()
+
+    outcome = gateway.execute(proposed)
+
+    assert outcome.state is ToolOutcomeState.SIMULATED
+    assert adapter.calls == 0
+
+    result_events = [
+        event
+        for event in gateway.ledger.for_mission(mission.id)
+        if event.event_type is LedgerEventType.RESULT_RECORDED
+    ]
+
+    assert result_events[-1].event_data["state"] == "simulated"
+    assert result_events[-1].event_data["capability"] == "service.restart"
+    assert result_events[-1].event_data["target"] == "ai-hq"
+
+
+class FakeDeploymentAdapter:
+    def __init__(self, capability):
+        self.capability = capability
+        self.calls = 0
+
+    def execute(self, request: ToolRequest) -> dict[str, object]:
+        self.calls += 1
+        return {
+            "target": request.target,
+            "capability": request.capability,
+            "executed": True,
+        }
+
+
+def test_deployment_deploy_requires_exact_permission():
+    adapter = FakeDeploymentAdapter("deployment.deploy")
+    gateway, adapter, mission = build_gateway(
+        permissions=["*"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    outcome = gateway.execute(
+        request(
+            mission.id,
+            capability="deployment.deploy",
+            mutates_external_state=True,
+        )
+    )
+
+    assert outcome.state is ToolOutcomeState.BLOCKED
+    assert outcome.reason == "permission_denied"
+    assert adapter.calls == 0
+
+
+def test_deployment_deploy_requires_approval_before_execution():
+    adapter = FakeDeploymentAdapter("deployment.deploy")
+    gateway, adapter, mission = build_gateway(
+        permissions=["deployment.deploy"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    deployment_request = request(
+        mission.id,
+        capability="deployment.deploy",
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(deployment_request)
+
+    assert waiting.state is ToolOutcomeState.WAITING_APPROVAL
+    assert waiting.approval_request_id is not None
+    assert adapter.calls == 0
+
+    gateway.safety.approvals.decide(
+        waiting.approval_request_id,
+        ApprovalState.APPROVED,
+    )
+
+    executed = gateway.execute(deployment_request)
+
+    assert executed.state is ToolOutcomeState.EXECUTED
+    assert adapter.calls == 1
+
+
+def test_deployment_deploy_simulation_never_executes_adapter():
+    adapter = FakeDeploymentAdapter("deployment.deploy")
+    gateway, adapter, mission = build_gateway(
+        permissions=["deployment.deploy"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    deployment_request = request(
+        mission.id,
+        capability="deployment.deploy",
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(deployment_request)
+
+    assert waiting.state is ToolOutcomeState.WAITING_APPROVAL
+    assert waiting.approval_request_id is not None
+    assert adapter.calls == 0
+
+    gateway.safety.approvals.decide(
+        waiting.approval_request_id,
+        ApprovalState.APPROVED,
+    )
+
+    with gateway.session_factory() as db:
+        state = db.get(SystemState, 1)
+        state.simulation_mode = True
+        db.commit()
+
+    simulated = gateway.execute(deployment_request)
+
+    assert simulated.state is ToolOutcomeState.SIMULATED
+    assert adapter.calls == 0
+
+
+def test_deployment_rollback_requires_approval_before_execution():
+    adapter = FakeDeploymentAdapter("deployment.rollback")
+    gateway, adapter, mission = build_gateway(
+        permissions=["deployment.rollback"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    rollback_request = request(
+        mission.id,
+        capability="deployment.rollback",
+        params={"release_id": "release-2.83.0"},
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(rollback_request)
+
+    assert waiting.state is ToolOutcomeState.WAITING_APPROVAL
+    assert waiting.approval_request_id is not None
+    assert adapter.calls == 0
+
+    gateway.safety.approvals.decide(
+        waiting.approval_request_id,
+        ApprovalState.APPROVED,
+    )
+
+    executed = gateway.execute(rollback_request)
+
+    assert executed.state is ToolOutcomeState.EXECUTED
+    assert adapter.calls == 1
+
+
+def test_deployment_rollback_simulation_never_executes_adapter():
+    adapter = FakeDeploymentAdapter("deployment.rollback")
+    gateway, adapter, mission = build_gateway(
+        permissions=["deployment.rollback"],
+        risk=MissionRisk.GREEN,
+        adapter=adapter,
+    )
+
+    rollback_request = request(
+        mission.id,
+        capability="deployment.rollback",
+        params={"release_id": "release-2.83.0"},
+        mutates_external_state=True,
+    )
+
+    waiting = gateway.execute(rollback_request)
+
+    assert waiting.state is ToolOutcomeState.WAITING_APPROVAL
+    assert waiting.approval_request_id is not None
+    assert adapter.calls == 0
+
+    gateway.safety.approvals.decide(
+        waiting.approval_request_id,
+        ApprovalState.APPROVED,
+    )
+
+    with gateway.session_factory() as db:
+        state = db.get(SystemState, 1)
+        state.simulation_mode = True
+        db.commit()
+
+    simulated = gateway.execute(rollback_request)
+
+    assert simulated.state is ToolOutcomeState.SIMULATED
+    assert adapter.calls == 0

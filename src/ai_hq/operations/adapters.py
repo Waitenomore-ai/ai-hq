@@ -30,6 +30,17 @@ class OperationalTransport(Protocol):
         target: OperationalTarget,
     ) -> dict[str, object]: ...
 
+    def deployment_deploy(
+        self,
+        target: OperationalTarget,
+    ) -> dict[str, object]: ...
+
+    def deployment_rollback(
+        self,
+        target: OperationalTarget,
+        release_id: str,
+    ) -> dict[str, object]: ...
+
 
 class _OperationalAdapter:
     capability: str
@@ -112,3 +123,56 @@ class ServiceRestartAdapter(_OperationalAdapter):
             raise ToolAdapterError("restart_requires_mutation_flag")
 
         return self.transport.service_restart(target)
+
+
+class DeploymentDeployAdapter(_OperationalAdapter):
+    capability = "deployment.deploy"
+
+    def execute(self, request: ToolRequest) -> dict[str, object]:
+        target = self._target(request)
+        self._require_no_params(request)
+
+        if not request.mutates_external_state:
+            raise ToolAdapterError("deployment_requires_mutation_flag")
+
+        method = getattr(self.transport, "deployment_deploy", None)
+        if method is None:
+            raise ToolAdapterError("deployment_transport_unavailable")
+
+        return method(target)
+
+
+class DeploymentRollbackAdapter(_OperationalAdapter):
+    capability = "deployment.rollback"
+
+    def execute(self, request: ToolRequest) -> dict[str, object]:
+        target = self._target(request)
+
+        if set(request.params) != {"release_id"}:
+            raise ToolAdapterError("invalid_rollback_parameters")
+
+        release_id = request.params.get("release_id")
+
+        if not isinstance(release_id, str):
+            raise ToolAdapterError("invalid_release_id")
+
+        if not release_id or len(release_id) > 128:
+            raise ToolAdapterError("invalid_release_id")
+
+        if not release_id.isascii():
+            raise ToolAdapterError("invalid_release_id")
+
+        if any(
+            not (char.isalnum() or char in "._-")
+            for char in release_id
+        ):
+            raise ToolAdapterError("invalid_release_id")
+
+        if not request.mutates_external_state:
+            raise ToolAdapterError("rollback_requires_mutation_flag")
+
+        method = getattr(self.transport, "deployment_rollback", None)
+        if method is None:
+            raise ToolAdapterError("deployment_transport_unavailable")
+
+        return method(target, release_id)
