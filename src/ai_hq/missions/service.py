@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +13,10 @@ from ai_hq.missions.models import (
     MissionStatus,
     MissionStep,
 )
+
+if TYPE_CHECKING:
+    from ai_hq.tool_gateway.registry import ToolRegistry
+
 
 SessionFactory = Callable[[], Session]
 
@@ -101,9 +106,25 @@ class MissionService:
         self,
         mission_id: str,
         steps: list[dict],
+        *,
+        tool_registry: "ToolRegistry | None" = None,
     ) -> list[MissionStep]:
         if not steps:
             raise ValueError("mission plan requires at least one step")
+
+        if tool_registry is not None:
+            for step in steps:
+                tool_name = step["tool_name"]
+                try:
+                    adapter = tool_registry.resolve(tool_name)
+                except (KeyError, ValueError) as exc:
+                    raise ValueError(
+                        f"unregistered mission tool: {tool_name}"
+                    ) from exc
+                if adapter is None:
+                    raise ValueError(
+                        f"unregistered mission tool: {tool_name}"
+                    )
 
         with self.session_factory() as db:
             mission = db.get(Mission, mission_id)

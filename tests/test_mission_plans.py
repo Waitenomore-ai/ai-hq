@@ -119,3 +119,37 @@ def test_create_plan_cannot_replace_existing_plan():
         assert "already has a plan" in str(exc)
     else:
         raise AssertionError("existing mission plan was replaced")
+
+
+def test_create_plan_rejects_unregistered_tool_before_persisting_steps():
+    from ai_hq.tool_gateway.registry import ToolRegistry
+
+    service, factory = build_service()
+    mission = create_test_mission(service)
+    registry = ToolRegistry([])
+
+    try:
+        service.create_plan(
+            mission.id,
+            [
+                {
+                    "description": "Attempt an unavailable operation",
+                    "tool_name": "host.unregistered",
+                    "tool_arguments": {"target": "ai-hq"},
+                }
+            ],
+            tool_registry=registry,
+        )
+    except (KeyError, ValueError) as exc:
+        assert "host.unregistered" in str(exc)
+    else:
+        raise AssertionError("unregistered tool was accepted into mission plan")
+
+    with factory() as db:
+        persisted = (
+            db.query(MissionStep)
+            .filter(MissionStep.mission_id == mission.id)
+            .all()
+        )
+
+    assert persisted == []
