@@ -1,6 +1,7 @@
 from ai_hq.agents.models import Agent
 from ai_hq.ai_router.usage import AIUsageRecord
 from ai_hq.approvals.models import ApprovalRequest, ScopedApprovalRule
+from ai_hq.chat.models import ChatConversation, ChatMessage
 from ai_hq.knowledge.models import KnowledgeMemory
 from ai_hq.ledger.models import LedgerEvent
 from ai_hq.missions.models import Mission
@@ -13,6 +14,8 @@ __all__ = [
     "AdminSession",
     "Agent",
     "ApprovalRequest",
+    "ChatConversation",
+    "ChatMessage",
     "KnowledgeMemory",
     "LedgerEvent",
     "Mission",
