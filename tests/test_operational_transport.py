@@ -1,95 +1,162 @@
 from dataclasses import dataclass, field
 
+import pytest
+
+from ai_hq.host_helper.client import HostHelperError
+from ai_hq.host_helper.contracts import (
+    HelperRequest,
+    HelperResponse,
+    HostCapability,
+)
 from ai_hq.operations.targets import OperationalTarget
-from ai_hq.operations.transport import SubprocessOperationalTransport
+from ai_hq.operations.transport import HostHelperOperationalTransport
+from ai_hq.tool_gateway.contracts import ToolAdapterError
 
 
 @dataclass
-class Completed:
-    returncode: int = 0
-    stdout: str = ""
-    stderr: str = ""
+class FakeHostHelper:
+    requests: list[HelperRequest] = field(default_factory=list)
+    fail: bool = False
+    helper_error: bool = False
+
+    def execute(self, request: HelperRequest) -> HelperResponse:
+        self.requests.append(request)
+
+        if self.helper_error:
+            raise HostHelperError("connection_failed")
+
+        if self.fail:
+            return HelperResponse(
+                ok=False,
+                capability=request.capability,
+                target=request.target,
+                data={},
+                error="command_failed",
+            )
+
+        data: dict[str, object]
+
+        if request.capability is HostCapability.HOST_HEALTH:
+            data = {"status": "ok"}
+        elif request.capability is HostCapability.SERVICE_STATUS:
+            data = {
+                "active_state": "active",
+                "sub_state": "running",
+            }
+        elif request.capability is HostCapability.LOGS_RECENT:
+            data = {
+                "text": "bounded log output",
+                "lines_requested": request.params["lines"],
+                "truncated": False,
+            }
+        else:
+            data = {}
+
+        return HelperResponse(
+            ok=True,
+            capability=request.capability,
+            target=request.target,
+            data=data,
+        )
 
 
-@dataclass
-class RecordingRunner:
-    calls: list[tuple[list[str], dict]] = field(default_factory=list)
-    result: Completed = field(default_factory=Completed)
-
-    def __call__(self, argv, **kwargs):
-        self.calls.append((list(argv), dict(kwargs)))
-        return self.result
-
-
-def target():
+def target() -> OperationalTarget:
     return OperationalTarget(
-        key="ai-hq",
-        service_unit="ai-hq.service",
-        log_unit="ai-hq.service",
-        allowed_capabilities=frozenset({
-            "system.health.read",
-            "service.status.read",
-            "service.logs.read",
-            "service.restart",
-        }),
+        key="dripvid",
+        service_unit="dripvid.service",
+        log_unit="dripvid",
+        allowed_capabilities=frozenset(
+            {
+                "system.health.read",
+                "service.status.read",
+                "service.logs.read",
+                "service.restart",
+            }
+        ),
     )
 
 
-def test_status_uses_fixed_systemctl_argv():
-    runner = RecordingRunner(result=Completed(stdout="active\n"))
-    transport = SubprocessOperationalTransport(runner=runner)
+def test_system_health_uses_host_helper():
+    helper = FakeHostHelper()
+    transport = HostHelperOperationalTransport(helper)
+
+    assert transport.system_health(target()) == {"status": "ok"}
+
+    assert helper.requests == [
+        HelperRequest(
+            capability=HostCapability.HOST_HEALTH,
+            target=None,
+            params={},
+        )
+    ]
+
+
+def test_service_status_uses_trusted_logical_target():
+    helper = FakeHostHelper()
+    transport = HostHelperOperationalTransport(helper)
 
     result = transport.service_status(target())
 
-    argv, kwargs = runner.calls[0]
-    assert argv == ["systemctl", "is-active", "ai-hq.service"]
-    assert kwargs.get("shell") is not True
-    assert result["active"] is True
-
-
-def test_logs_use_fixed_journalctl_argv():
-    runner = RecordingRunner(result=Completed(stdout="one\ntwo\n"))
-    transport = SubprocessOperationalTransport(runner=runner)
-
-    result = transport.service_logs(target(), lines=100)
-
-    argv, kwargs = runner.calls[0]
-    assert argv == [
-        "journalctl",
-        "--unit",
-        "ai-hq.service",
-        "--lines",
-        "100",
-        "--no-pager",
+    assert result["active_state"] == "active"
+    assert helper.requests == [
+        HelperRequest(
+            capability=HostCapability.SERVICE_STATUS,
+            target="dripvid",
+            params={},
+        )
     ]
-    assert kwargs.get("shell") is not True
-    assert result["lines"] == ["one", "two"]
 
 
-def test_restart_uses_registered_unit_only():
-    runner = RecordingRunner()
-    transport = SubprocessOperationalTransport(runner=runner)
+@pytest.mark.parametrize("lines", [1, 100, 200])
+def test_logs_accept_host_helper_bounded_line_counts(lines):
+    helper = FakeHostHelper()
+    transport = HostHelperOperationalTransport(helper)
 
-    result = transport.service_restart(target())
+    result = transport.service_logs(target(), lines=lines)
 
-    argv, kwargs = runner.calls[0]
-    assert argv == ["systemctl", "restart", "ai-hq.service"]
-    assert kwargs.get("shell") is not True
-    assert result["restarted"] is True
+    assert result["lines_requested"] == lines
+    assert helper.requests[-1] == HelperRequest(
+        capability=HostCapability.LOGS_RECENT,
+        target="dripvid",
+        params={"lines": lines},
+    )
 
 
-def test_health_is_bounded_service_observation():
-    runner = RecordingRunner(result=Completed(stdout="active\n"))
-    transport = SubprocessOperationalTransport(runner=runner)
+@pytest.mark.parametrize("lines", [0, 201, -1, True, "100"])
+def test_logs_reject_values_outside_host_helper_contract(lines):
+    helper = FakeHostHelper()
+    transport = HostHelperOperationalTransport(helper)
 
-    result = transport.system_health(target())
+    with pytest.raises(ToolAdapterError, match="invalid_log_line_count"):
+        transport.service_logs(target(), lines=lines)
 
-    assert result == {
-        "target": "ai-hq",
-        "service_active": True,
-    }
-    assert runner.calls[0][0] == [
-        "systemctl",
-        "is-active",
-        "ai-hq.service",
-    ]
+    assert helper.requests == []
+
+
+def test_host_helper_failure_fails_closed():
+    helper = FakeHostHelper(fail=True)
+    transport = HostHelperOperationalTransport(helper)
+
+    with pytest.raises(ToolAdapterError, match="command_failed"):
+        transport.service_status(target())
+
+
+def test_host_helper_connection_failure_fails_closed():
+    helper = FakeHostHelper(helper_error=True)
+    transport = HostHelperOperationalTransport(helper)
+
+    with pytest.raises(ToolAdapterError, match="host_helper_unavailable"):
+        transport.service_status(target())
+
+
+def test_restart_has_no_local_fallback():
+    helper = FakeHostHelper()
+    transport = HostHelperOperationalTransport(helper)
+
+    with pytest.raises(
+        ToolAdapterError,
+        match="restart_host_helper_unavailable",
+    ):
+        transport.service_restart(target())
+
+    assert helper.requests == []

@@ -1,6 +1,4 @@
 from ai_hq.operations.adapters import (
-    DEFAULT_LOG_LINES,
-    MAX_LOG_LINES,
     OperationalTransport,
     ServiceLogsAdapter,
     ServiceRestartAdapter,
@@ -15,19 +13,21 @@ from ai_hq.operations.targets import (
     OperationalTarget,
     OperationalTargetRegistry,
 )
-from ai_hq.operations.transport import SubprocessOperationalTransport
+from ai_hq.operations.transport import (
+    HostHelperOperationalTransport,
+    OperationalHostTransport,
+)
 
 __all__ = [
-    "DEFAULT_LOG_LINES",
-    "MAX_LOG_LINES",
     "OperationalTarget",
     "OperationalTargetRegistry",
     "OperationalTransport",
+    "SystemHealthAdapter",
+    "ServiceStatusAdapter",
     "ServiceLogsAdapter",
     "ServiceRestartAdapter",
-    "ServiceStatusAdapter",
-    "SubprocessOperationalTransport",
-    "SystemHealthAdapter",
-    "build_operational_tool_registry",
+    "HostHelperOperationalTransport",
+    "OperationalHostTransport",
     "operational_adapters",
+    "build_operational_tool_registry",
 ]

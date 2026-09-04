@@ -1,82 +1,72 @@
-from collections.abc import Callable
-import subprocess
+from typing import Protocol
 
+from ai_hq.host_helper.client import HostHelperError
+from ai_hq.host_helper.contracts import (
+    HelperRequest,
+    HelperResponse,
+    HostCapability,
+)
 from ai_hq.operations.targets import OperationalTarget
 from ai_hq.tool_gateway.contracts import ToolAdapterError
 
-Runner = Callable[..., object]
 
-MAX_OUTPUT_CHARS = 64_000
-COMMAND_TIMEOUT_SECONDS = 15
+HOST_HELPER_MAX_LOG_LINES = 200
 
 
-class SubprocessOperationalTransport:
-    """
-    Restricted local operational transport.
+class HostHelperTransport(Protocol):
+    def execute(self, request: HelperRequest) -> HelperResponse: ...
 
-    This class never accepts an executable, service unit, file path,
-    hostname, or command from a mission. Those values come from trusted
-    OperationalTarget configuration.
-    """
 
-    def __init__(self, *, runner: Runner = subprocess.run) -> None:
-        self.runner = runner
+class HostHelperOperationalTransport:
+    """Operational transport whose only privileged boundary is Host Helper."""
 
-    def _run(self, argv: list[str]) -> object:
+    def __init__(self, client: HostHelperTransport) -> None:
+        self.client = client
+
+    def _execute(self, request: HelperRequest) -> dict[str, object]:
         try:
-            result = self.runner(
-                argv,
-                capture_output=True,
-                text=True,
-                timeout=COMMAND_TIMEOUT_SECONDS,
-                check=False,
+            response = self.client.execute(request)
+        except HostHelperError as exc:
+            raise ToolAdapterError("host_helper_unavailable") from exc
+
+        if not response.ok:
+            raise ToolAdapterError(
+                response.error or "host_helper_failed"
             )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise ToolAdapterError("operational_command_failed") from exc
 
-        returncode = getattr(result, "returncode", 1)
+        if (
+            response.capability is not request.capability
+            or response.target != request.target
+        ):
+            raise ToolAdapterError("host_helper_response_mismatch")
 
-        if returncode != 0:
-            raise ToolAdapterError("operational_command_failed")
-
-        return result
-
-    @staticmethod
-    def _stdout(result: object) -> str:
-        value = getattr(result, "stdout", "")
-        if not isinstance(value, str):
-            return ""
-        return value[:MAX_OUTPUT_CHARS]
+        return response.data
 
     def system_health(
         self,
         target: OperationalTarget,
     ) -> dict[str, object]:
-        result = self._run(
-            ["systemctl", "is-active", target.service_unit]
+        # Host health is intentionally host-scoped. The logical operational
+        # target has already been validated by the capability adapter.
+        return self._execute(
+            HelperRequest(
+                capability=HostCapability.HOST_HEALTH,
+                target=None,
+                params={},
+            )
         )
-        active = self._stdout(result).strip() == "active"
-
-        return {
-            "target": target.key,
-            "service_active": active,
-        }
 
     def service_status(
         self,
         target: OperationalTarget,
     ) -> dict[str, object]:
-        result = self._run(
-            ["systemctl", "is-active", target.service_unit]
+        return self._execute(
+            HelperRequest(
+                capability=HostCapability.SERVICE_STATUS,
+                target=target.key,
+                params={},
+            )
         )
-        state = self._stdout(result).strip()
-
-        return {
-            "target": target.key,
-            "service": target.service_unit,
-            "state": state,
-            "active": state == "active",
-        }
 
     def service_logs(
         self,
@@ -84,34 +74,30 @@ class SubprocessOperationalTransport:
         *,
         lines: int,
     ) -> dict[str, object]:
-        unit = target.log_unit or target.service_unit
+        if (
+            isinstance(lines, bool)
+            or not isinstance(lines, int)
+            or lines < 1
+            or lines > HOST_HELPER_MAX_LOG_LINES
+        ):
+            raise ToolAdapterError("invalid_log_line_count")
 
-        result = self._run([
-            "journalctl",
-            "--unit",
-            unit,
-            "--lines",
-            str(lines),
-            "--no-pager",
-        ])
-
-        output = self._stdout(result)
-
-        return {
-            "target": target.key,
-            "lines": output.splitlines(),
-        }
+        return self._execute(
+            HelperRequest(
+                capability=HostCapability.LOGS_RECENT,
+                target=target.key,
+                params={"lines": lines},
+            )
+        )
 
     def service_restart(
         self,
         target: OperationalTarget,
     ) -> dict[str, object]:
-        self._run(
-            ["systemctl", "restart", target.service_unit]
-        )
+        # Restart becomes executable only after an explicit bounded
+        # Host Helper restart capability is implemented and approved.
+        raise ToolAdapterError("restart_host_helper_unavailable")
 
-        return {
-            "target": target.key,
-            "service": target.service_unit,
-            "restarted": True,
-        }
+
+# Compatibility name for code that imports the Stage 2 transport symbol.
+OperationalHostTransport = HostHelperOperationalTransport
