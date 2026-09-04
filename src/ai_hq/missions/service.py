@@ -12,6 +12,7 @@ from ai_hq.missions.models import (
     MissionRisk,
     MissionStatus,
     MissionStep,
+    MissionStepStatus,
 )
 
 if TYPE_CHECKING:
@@ -49,6 +50,24 @@ _ALLOWED_TRANSITIONS: dict[MissionStatus, set[MissionStatus]] = {
     MissionStatus.COMPLETED: set(),
     MissionStatus.FAILED: set(),
     MissionStatus.CANCELLED: set(),
+}
+
+
+_ALLOWED_STEP_TRANSITIONS: dict[MissionStepStatus, set[MissionStepStatus]] = {
+    MissionStepStatus.PENDING: {
+        MissionStepStatus.RUNNING,
+    },
+    MissionStepStatus.RUNNING: {
+        MissionStepStatus.WAITING_APPROVAL,
+        MissionStepStatus.SUCCEEDED,
+        MissionStepStatus.FAILED,
+    },
+    MissionStepStatus.WAITING_APPROVAL: {
+        MissionStepStatus.RUNNING,
+        MissionStepStatus.FAILED,
+    },
+    MissionStepStatus.SUCCEEDED: set(),
+    MissionStepStatus.FAILED: set(),
 }
 
 
@@ -157,6 +176,60 @@ class MissionService:
                 db.refresh(step)
 
             return planned_steps
+
+    def next_pending_step(self, mission_id: str) -> MissionStep | None:
+        with self.session_factory() as db:
+            mission = db.get(Mission, mission_id)
+            if mission is None:
+                raise KeyError(f"mission not found: {mission_id}")
+
+            return db.scalar(
+                select(MissionStep)
+                .where(
+                    MissionStep.mission_id == mission_id,
+                    MissionStep.status == MissionStepStatus.PENDING,
+                )
+                .order_by(MissionStep.position, MissionStep.id)
+                .limit(1)
+            )
+
+    def transition_step(
+        self,
+        step_id: str,
+        status: MissionStepStatus | str,
+        *,
+        result: dict | None = None,
+        error_state: dict | None = None,
+        approval_reference: str | None = None,
+    ) -> MissionStep:
+        target = MissionStepStatus(status)
+
+        with self.session_factory() as db:
+            step = db.get(MissionStep, step_id)
+            if step is None:
+                raise KeyError(f"mission step not found: {step_id}")
+
+            previous = step.status
+            if target not in _ALLOWED_STEP_TRANSITIONS[previous]:
+                raise ValueError(
+                    "invalid mission step transition: "
+                    f"{previous.value} -> {target.value}"
+                )
+
+            step.status = target
+
+            if result is not None:
+                step.result = result
+
+            if error_state is not None:
+                step.error_state = error_state
+
+            if approval_reference is not None:
+                step.approval_reference = approval_reference
+
+            db.commit()
+            db.refresh(step)
+            return step
 
     def get_mission(self, mission_id: str) -> Mission:
         with self.session_factory() as db:

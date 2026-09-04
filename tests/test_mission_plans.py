@@ -153,3 +153,101 @@ def test_create_plan_rejects_unregistered_tool_before_persisting_steps():
         )
 
     assert persisted == []
+
+
+def test_next_pending_step_is_deterministic_and_skips_succeeded_steps():
+    service, _ = build_service()
+    mission = create_test_mission(service)
+
+    steps = service.create_plan(
+        mission.id,
+        [
+            {
+                "description": "First step",
+                "tool_name": "host.health",
+                "tool_arguments": {"target": "ai-hq"},
+            },
+            {
+                "description": "Second step",
+                "tool_name": "host.health",
+                "tool_arguments": {"target": "dripvid"},
+            },
+        ],
+    )
+
+    selected = service.next_pending_step(mission.id)
+    assert selected is not None
+    assert selected.id == steps[0].id
+    assert selected.position == 1
+
+    running = service.transition_step(
+        selected.id,
+        MissionStepStatus.RUNNING,
+    )
+    assert running.status is MissionStepStatus.RUNNING
+
+    succeeded = service.transition_step(
+        selected.id,
+        MissionStepStatus.SUCCEEDED,
+        result={"status": "ok"},
+    )
+    assert succeeded.status is MissionStepStatus.SUCCEEDED
+    assert succeeded.result == {"status": "ok"}
+
+    selected = service.next_pending_step(mission.id)
+    assert selected is not None
+    assert selected.id == steps[1].id
+    assert selected.position == 2
+
+
+def test_completed_plan_has_no_next_pending_step():
+    service, _ = build_service()
+    mission = create_test_mission(service)
+
+    steps = service.create_plan(
+        mission.id,
+        [
+            {
+                "description": "Only step",
+                "tool_name": "host.health",
+                "tool_arguments": {},
+            }
+        ],
+    )
+
+    service.transition_step(
+        steps[0].id,
+        MissionStepStatus.RUNNING,
+    )
+    service.transition_step(
+        steps[0].id,
+        MissionStepStatus.SUCCEEDED,
+    )
+
+    assert service.next_pending_step(mission.id) is None
+
+
+def test_step_lifecycle_rejects_invalid_transition():
+    service, _ = build_service()
+    mission = create_test_mission(service)
+
+    step = service.create_plan(
+        mission.id,
+        [
+            {
+                "description": "Protected step",
+                "tool_name": "host.health",
+                "tool_arguments": {},
+            }
+        ],
+    )[0]
+
+    try:
+        service.transition_step(
+            step.id,
+            MissionStepStatus.SUCCEEDED,
+        )
+    except ValueError as exc:
+        assert "invalid mission step transition" in str(exc)
+    else:
+        raise AssertionError("invalid step transition was accepted")
