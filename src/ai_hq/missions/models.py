@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Enum, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ai_hq.db import Base
@@ -16,6 +16,14 @@ class MissionStatus(StrEnum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+
+
+class MissionStepStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    WAITING_APPROVAL = "WAITING_APPROVAL"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
 
 
 class MissionPriority(StrEnum):
@@ -61,4 +69,46 @@ class Mission(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+class MissionStep(Base):
+    __tablename__ = "mission_steps"
+    __table_args__ = (
+        UniqueConstraint("mission_id", "position", name="uq_mission_steps_mission_position"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+    mission_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("missions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    tool_arguments: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[MissionStepStatus] = mapped_column(
+        Enum(MissionStepStatus, native_enum=False),
+        default=MissionStepStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    approval_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )

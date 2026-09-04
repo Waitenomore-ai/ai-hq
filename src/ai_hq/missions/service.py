@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session
 
 from ai_hq.ledger.models import LedgerEventType
 from ai_hq.ledger.service import OperationsLedger
-from ai_hq.missions.models import Mission, MissionPriority, MissionRisk, MissionStatus
+from ai_hq.missions.models import (
+    Mission,
+    MissionPriority,
+    MissionRisk,
+    MissionStatus,
+    MissionStep,
+)
 
 SessionFactory = Callable[[], Session]
 
@@ -90,6 +96,46 @@ class MissionService:
             db.commit()
             db.refresh(mission)
             return mission
+
+    def create_plan(
+        self,
+        mission_id: str,
+        steps: list[dict],
+    ) -> list[MissionStep]:
+        if not steps:
+            raise ValueError("mission plan requires at least one step")
+
+        with self.session_factory() as db:
+            mission = db.get(Mission, mission_id)
+            if mission is None:
+                raise KeyError(f"mission not found: {mission_id}")
+
+            existing = db.scalar(
+                select(MissionStep)
+                .where(MissionStep.mission_id == mission_id)
+                .limit(1)
+            )
+            if existing is not None:
+                raise ValueError("mission already has a plan")
+
+            planned_steps = [
+                MissionStep(
+                    mission_id=mission.id,
+                    position=position,
+                    description=step["description"],
+                    tool_name=step["tool_name"],
+                    tool_arguments=step.get("tool_arguments", {}),
+                )
+                for position, step in enumerate(steps, start=1)
+            ]
+
+            db.add_all(planned_steps)
+            db.commit()
+
+            for step in planned_steps:
+                db.refresh(step)
+
+            return planned_steps
 
     def get_mission(self, mission_id: str) -> Mission:
         with self.session_factory() as db:
