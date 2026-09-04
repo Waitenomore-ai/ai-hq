@@ -11,6 +11,9 @@ from ai_hq.ledger.service import OperationsLedger
 from ai_hq.missions.service import MissionService
 from ai_hq.missions.executor import MissionExecutor
 from ai_hq.missions.worker import AutonomousMissionRunner
+from ai_hq.operations.adapters import ServiceLogsAdapter, ServiceStatusAdapter, SystemHealthAdapter
+from ai_hq.operations.targets import OperationalTarget, OperationalTargetRegistry
+from ai_hq.operations.transport import HostHelperOperationalTransport
 from ai_hq.tool_gateway.registry import ToolRegistry
 from ai_hq.tool_gateway.service import ToolGateway
 from ai_hq.queue import redis_ping
@@ -85,9 +88,37 @@ def build_autonomous_mission_runner(
     missions = MissionService(session_factory, ledger)
     safety = SafetyService(session_factory, ledger=ledger)
 
+    registry = ToolRegistry([])
+
+    if settings.host_helper_credential:
+        helper = HostHelperClient(
+            settings.host_helper_socket,
+            settings.host_helper_credential,
+        )
+        transport = HostHelperOperationalTransport(helper)
+
+        targets = OperationalTargetRegistry([
+            OperationalTarget(
+                key="ai-hq",
+                service_unit="ai-hq",
+                log_unit="ai-hq",
+                allowed_capabilities=frozenset({
+                    "system.health.read",
+                    "service.status.read",
+                    "service.logs.read",
+                }),
+            )
+        ])
+
+        registry = ToolRegistry([
+            SystemHealthAdapter(targets=targets, transport=transport),
+            ServiceStatusAdapter(targets=targets, transport=transport),
+            ServiceLogsAdapter(targets=targets, transport=transport),
+        ])
+
     gateway = ToolGateway(
         session_factory,
-        registry=ToolRegistry([]),
+        registry=registry,
         safety=safety,
         ledger=ledger,
     )
