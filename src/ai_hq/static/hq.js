@@ -134,3 +134,329 @@
   refresh();
   window.setInterval(refresh, 10000);
 })();
+
+/* ==========================================================
+   SysAdmin Chat v1
+   ========================================================== */
+
+(() => {
+  const panel = document.getElementById("sysadmin-chat");
+  const messages = document.getElementById("sysadmin-chat-messages");
+  const form = document.getElementById("sysadmin-chat-form");
+  const input = document.getElementById("sysadmin-chat-input");
+  const send = document.getElementById("sysadmin-chat-send");
+  const status = document.getElementById("sysadmin-chat-status");
+
+  if (!panel || !messages || !form || !input || !send || !status) {
+    return;
+  }
+
+  const rootPath =
+    (document.body.dataset.rootPath || "").replace(/\/$/, "");
+
+  let conversationId = null;
+  let pollingMissionId = null;
+
+  function api(path) {
+    return `${rootPath}${path}`;
+  }
+
+  function getCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+
+    if (meta?.content) {
+      return meta.content;
+    }
+
+    const field = document.querySelector(
+      '[name="csrf_token"]'
+    );
+
+    if (field?.value) {
+      return field.value;
+    }
+
+    if (document.body.dataset.csrfToken) {
+      return document.body.dataset.csrfToken;
+    }
+
+    return "";
+  }
+
+  function writeHeaders() {
+    return {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": getCsrfToken(),
+    };
+  }
+
+  function setStatus(text) {
+    status.textContent = text;
+  }
+
+  function appendMessage(role, content) {
+    if (!content) {
+      return;
+    }
+
+    const row = document.createElement("div");
+    row.className =
+      `sysadmin-chat__message sysadmin-chat__message--${role}`;
+
+    const author = document.createElement("strong");
+    author.className = "sysadmin-chat__author";
+    author.textContent = role === "user" ? "You" : "SysAdmin";
+
+    const body = document.createElement("div");
+    body.className = "sysadmin-chat__message-body";
+    body.textContent = content;
+
+    row.append(author, body);
+    messages.appendChild(row);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function resultMessage(result) {
+    if (!result?.message) {
+      return null;
+    }
+
+    if (typeof result.message === "string") {
+      return result.message;
+    }
+
+    return result.message.content || null;
+  }
+
+  async function request(path, options = {}) {
+    const response = await fetch(api(path), {
+      credentials: "same-origin",
+      ...options,
+    });
+
+    if (!response.ok) {
+      let message = `Request failed (${response.status})`;
+
+      try {
+        const payload = await response.json();
+
+        if (payload.detail) {
+          message =
+            typeof payload.detail === "string"
+              ? payload.detail
+              : JSON.stringify(payload.detail);
+        }
+      } catch (_) {
+        // Keep generic HTTP message.
+      }
+
+      throw new Error(message);
+    }
+
+    return response.json();
+  }
+
+  async function ensureConversation() {
+    if (conversationId) {
+      return conversationId;
+    }
+
+    const existing = await request(
+      "/api/chat/conversations"
+    );
+
+    if (existing.conversations?.length) {
+      conversationId = existing.conversations[0].id;
+      return conversationId;
+    }
+
+    const created = await request(
+      "/api/chat/conversations",
+      {
+        method: "POST",
+        headers: writeHeaders(),
+      }
+    );
+
+    conversationId = created.conversation.id;
+    return conversationId;
+  }
+
+  async function loadMessages() {
+    const id = await ensureConversation();
+
+    const payload = await request(
+      `/api/chat/conversations/${id}/messages`
+    );
+
+    messages.replaceChildren();
+
+    if (!payload.messages?.length) {
+      const welcome = document.createElement("div");
+      welcome.className = "sysadmin-chat__welcome";
+      welcome.textContent =
+        "Ask SysAdmin about AI HQ health, service status, or recent logs.";
+      messages.appendChild(welcome);
+      return;
+    }
+
+    for (const message of payload.messages) {
+      appendMessage(message.role, message.content);
+    }
+  }
+
+  function pollMission(missionId) {
+    if (!missionId) {
+      return;
+    }
+
+    pollingMissionId = missionId;
+
+    const poll = async () => {
+      if (pollingMissionId !== missionId) {
+        return;
+      }
+
+      try {
+        const result = await request(
+          `/api/chat/conversations/${conversationId}` +
+          `/missions/${missionId}`
+        );
+
+        if (result.state === "pending") {
+          setStatus("Checking AI HQ…");
+          setTimeout(poll, 1200);
+          return;
+        }
+
+        pollingMissionId = null;
+        setStatus("Ready");
+
+        const content = resultMessage(result);
+
+        if (content) {
+          appendMessage("assistant", content);
+        } else {
+          await loadMessages();
+        }
+      } catch (error) {
+        pollingMissionId = null;
+        setStatus("Unavailable");
+        appendMessage(
+          "assistant",
+          `Unable to refresh mission: ${error.message}`
+        );
+      }
+    };
+
+    setTimeout(poll, 800);
+  }
+
+  async function submitMessage(text) {
+    const id = await ensureConversation();
+
+    appendMessage("user", text);
+    setStatus("Thinking…");
+
+    const result = await request(
+      `/api/chat/conversations/${id}/messages`,
+      {
+        method: "POST",
+        headers: writeHeaders(),
+        body: JSON.stringify({ text }),
+      }
+    );
+
+    const content = resultMessage(result);
+
+    if (content) {
+      appendMessage("assistant", content);
+    }
+
+    if (
+      result.state === "pending" &&
+      result.mission_id
+    ) {
+      setStatus("Checking AI HQ…");
+      pollMission(result.mission_id);
+      return;
+    }
+
+    setStatus("Ready");
+  }
+
+  async function openSysAdminChat() {
+    panel.hidden = false;
+    setStatus("Loading…");
+
+    try {
+      await loadMessages();
+      setStatus("Ready");
+      input.focus();
+    } catch (error) {
+      setStatus("Unavailable");
+      appendMessage(
+        "assistant",
+        `SysAdmin Chat unavailable: ${error.message}`
+      );
+    }
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const text = input.value.trim();
+
+    if (!text) {
+      return;
+    }
+
+    input.value = "";
+    input.disabled = true;
+    send.disabled = true;
+
+    try {
+      await submitMessage(text);
+    } catch (error) {
+      setStatus("Unavailable");
+      appendMessage(
+        "assistant",
+        `SysAdmin Chat unavailable: ${error.message}`
+      );
+    } finally {
+      input.disabled = false;
+      send.disabled = false;
+      input.focus();
+    }
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const room = event.target.closest(
+      '[data-room-key="sysadmin"]'
+    );
+
+    if (room) {
+      openSysAdminChat();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    const room = event.target.closest(
+      '[data-room-key="sysadmin"]'
+    );
+
+    if (
+      room &&
+      (event.key === "Enter" || event.key === " ")
+    ) {
+      setTimeout(openSysAdminChat, 0);
+    }
+  });
+})();

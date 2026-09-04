@@ -138,7 +138,64 @@
         </dl>
       </div>
     </aside>
-  </main>
+
+      <section
+        id="sysadmin-chat"
+        class="sysadmin-chat"
+        hidden
+        aria-label="SysAdmin chat"
+      >
+        <header class="sysadmin-chat__header">
+          <div>
+            <strong>SysAdmin</strong>
+            <span class="sysadmin-chat__mode">Read-only AI HQ operations</span>
+          </div>
+
+          <span
+            id="sysadmin-chat-status"
+            class="sysadmin-chat__status"
+            aria-live="polite"
+          >Ready</span>
+        </header>
+
+        <div
+          id="sysadmin-chat-messages"
+          class="sysadmin-chat-messages"
+          aria-live="polite"
+          aria-relevant="additions"
+        >
+          <div class="sysadmin-chat__welcome">
+            Ask SysAdmin about AI HQ health, service status, or recent logs.
+          </div>
+        </div>
+
+        <form id="sysadmin-chat-form" class="sysadmin-chat__form">
+          <label class="sr-only" for="sysadmin-chat-input">
+            Message SysAdmin
+          </label>
+
+          <textarea
+            id="sysadmin-chat-input"
+            name="text"
+            rows="2"
+            maxlength="4000"
+            placeholder="Ask SysAdmin about AI HQ…"
+            aria-label="Message SysAdmin"
+            autocomplete="off"
+          ></textarea>
+
+          <button
+            id="sysadmin-chat-send"
+            type="submit"
+          >Send</button>
+        </form>
+
+        <p class="sysadmin-chat__safety">
+          Read-only. Operational requests use the AI HQ mission safety pipeline.
+        </p>
+      </section>
+
+</main>
 
   <script src="{{ root_path }}/static/hq.js" defer></script>
 </body>
