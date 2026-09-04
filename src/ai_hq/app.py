@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from redis import Redis
 
+from ai_hq.chat.api import install_chat_routes
 from ai_hq.ai_router.api import install_ai_router_routes
 from ai_hq.approvals.api import install_approval_routes
 from ai_hq.config import Settings, get_settings
@@ -88,6 +89,11 @@ def create_app(
             session_factory=factory,
         )
         install_hq_routes(
+            app,
+            settings=settings,
+            session_factory=factory,
+        )
+        install_chat_routes(
             app,
             settings=settings,
             session_factory=factory,
