@@ -186,3 +186,23 @@ def test_chat_api_validation_registry_is_exactly_read_only():
         "shell.execute",
     ):
         assert forbidden not in source
+
+
+def test_chat_api_uses_database_backed_session_resolution():
+    """
+    Regression: production resolve_request_session requires
+    (request, db, settings). Chat API must resolve the authenticated
+    session through a database session, just like the main web routes.
+    """
+    from pathlib import Path
+
+    source = Path("src/ai_hq/chat/api.py").read_text()
+
+    assert "with session_factory() as db:" in source, (
+        "Chat API is not opening a database session for authentication"
+    )
+
+    assert "resolve_request_session(request, db, settings)" in source, (
+        "Chat API is not using the production three-argument "
+        "session resolver contract"
+    )

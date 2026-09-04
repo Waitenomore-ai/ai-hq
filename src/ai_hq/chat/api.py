@@ -49,20 +49,19 @@ def _session_csrf(session: Any) -> str | None:
 def _require_session(
     request: Request,
     settings: Any,
+    session_factory: Any,
 ) -> tuple[Any, str]:
-    try:
-        session = resolve_request_session(request, settings)
-    except TypeError:
-        # Compatibility with the existing one-argument helper contract.
-        session = resolve_request_session(request)
+    with session_factory() as db:
+        resolved = resolve_request_session(request, db, settings)
 
-    if session is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required",
-        )
+        if resolved is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required",
+            )
 
-    return session, _session_identifier(session)
+        _raw_token, session = resolved
+        return session, _session_identifier(session)
 
 
 def _require_write_security(
@@ -215,6 +214,7 @@ def install_chat_routes(
         _session, owner_session_id = _require_session(
             request,
             settings,
+            session_factory,
         )
 
         conversations = chat_service.list_conversations(
@@ -233,6 +233,7 @@ def install_chat_routes(
         session, owner_session_id = _require_session(
             request,
             settings,
+            session_factory,
         )
 
         _require_write_security(
@@ -260,6 +261,7 @@ def install_chat_routes(
         _session, owner_session_id = _require_session(
             request,
             settings,
+            session_factory,
         )
 
         try:
@@ -288,6 +290,7 @@ def install_chat_routes(
         session, owner_session_id = _require_session(
             request,
             settings,
+            session_factory,
         )
 
         _require_write_security(
@@ -327,6 +330,7 @@ def install_chat_routes(
         _session, owner_session_id = _require_session(
             request,
             settings,
+            session_factory,
         )
 
         try:
