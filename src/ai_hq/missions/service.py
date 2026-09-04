@@ -231,6 +231,43 @@ class MissionService:
             db.refresh(step)
             return step
 
+    def list_plan_steps(self, mission_id: str) -> list[MissionStep]:
+        with self.session_factory() as db:
+            mission = db.get(Mission, mission_id)
+            if mission is None:
+                raise KeyError(f"mission not found: {mission_id}")
+
+            return list(
+                db.scalars(
+                    select(MissionStep)
+                    .where(MissionStep.mission_id == mission_id)
+                    .order_by(MissionStep.position, MissionStep.id)
+                )
+            )
+
+    def waiting_approval_step(self, mission_id: str) -> MissionStep | None:
+        with self.session_factory() as db:
+            mission = db.get(Mission, mission_id)
+            if mission is None:
+                raise KeyError(f"mission not found: {mission_id}")
+
+            return db.scalar(
+                select(MissionStep)
+                .where(
+                    MissionStep.mission_id == mission_id,
+                    MissionStep.status == MissionStepStatus.WAITING_APPROVAL,
+                )
+                .order_by(MissionStep.position, MissionStep.id)
+                .limit(1)
+            )
+
+    def plan_is_complete(self, mission_id: str) -> bool:
+        steps = self.list_plan_steps(mission_id)
+        return bool(steps) and all(
+            step.status is MissionStepStatus.SUCCEEDED
+            for step in steps
+        )
+
     def get_mission(self, mission_id: str) -> Mission:
         with self.session_factory() as db:
             mission = db.get(Mission, mission_id)

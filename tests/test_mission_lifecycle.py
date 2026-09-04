@@ -167,3 +167,47 @@ def test_authenticated_list_and_detail_expose_local_mission_records_only():
     assert detail.status_code == 200
     assert detail.json()["title"] == "List me"
     assert client.post(f"/api/missions/{created['id']}/execute", headers=auth_headers).status_code == 404
+
+
+def test_mission_detail_exposes_persisted_plan_progress():
+    client, factory = build_client()
+    auth_headers, csrf_token = login(client, factory)
+
+    created = client.post(
+        "/api/missions",
+        json={
+            "title": "Inspectable autonomous mission",
+            "description": "Expose autonomous plan progress.",
+            "owner_agent": "sysadmin",
+            "source": "direct_user_request",
+            "priority": "normal",
+            "risk": "green",
+        },
+        headers={**auth_headers, "X-CSRF-Token": csrf_token},
+    ).json()
+
+    service = MissionService(factory)
+    service.create_plan(
+        created["id"],
+        [
+            {
+                "description": "Inspect readiness",
+                "tool_name": "host.health",
+                "tool_arguments": {"target": "ai-hq"},
+            }
+        ],
+    )
+
+    detail = client.get(
+        f"/api/missions/{created['id']}",
+        headers=auth_headers,
+    )
+
+    assert detail.status_code == 200
+    plan = detail.json()["plan"]
+
+    assert len(plan) == 1
+    assert plan[0]["position"] == 1
+    assert plan[0]["description"] == "Inspect readiness"
+    assert plan[0]["tool_name"] == "host.health"
+    assert plan[0]["status"] == "PENDING"

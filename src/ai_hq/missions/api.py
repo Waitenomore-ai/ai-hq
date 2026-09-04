@@ -75,7 +75,22 @@ def install_mission_routes(app: FastAPI, *, settings: Settings, session_factory)
             mission = missions.get_mission(mission_id)
         except KeyError:
             return JSONResponse({"error": "Mission not found"}, status_code=404)
-        return _mission_payload(mission)
+        payload = _mission_payload(mission)
+        payload["plan"] = [
+            {
+                "id": step.id,
+                "position": step.position,
+                "description": step.description,
+                "tool_name": step.tool_name,
+                "tool_arguments": step.tool_arguments,
+                "status": step.status.value,
+                "result": step.result,
+                "error_state": step.error_state,
+                "approval_reference": step.approval_reference,
+            }
+            for step in missions.list_plan_steps(mission.id)
+        ]
+        return payload
 
     @app.post("/api/missions", status_code=201)
     async def create_mission(request: Request):
