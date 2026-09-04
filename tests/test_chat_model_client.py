@@ -195,3 +195,218 @@ def test_invalid_provider_response_is_rejected(payload):
             "System",
             [{"role": "user", "content": "Hi"}],
         )
+
+
+def test_build_chat_model_client_uses_local_free_provider_first():
+    from ai_hq.chat.free_model_router import FreeModelRouter
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_local_base_url="http://127.0.0.1:11434/v1",
+        free_ai_local_model="local-model",
+        free_ai_local_api_key=None,
+        free_ai_groq_api_key="groq-secret",
+        free_ai_groq_model="groq-model",
+        free_ai_openrouter_api_key="openrouter-secret",
+        free_ai_hf_token="hf-secret",
+        free_ai_hf_model="hf-model",
+    )
+
+    client = build_chat_model_client(settings)
+
+    assert isinstance(client, FreeModelRouter)
+
+    providers = client.providers
+
+    assert [provider.name for provider in providers] == [
+        "local",
+        "groq",
+        "openrouter",
+        "huggingface",
+    ]
+
+    assert providers[0].client.base_url == "http://127.0.0.1:11434/v1"
+    assert providers[0].client.model == "local-model"
+    assert providers[0].zero_cost_policy == "local"
+
+
+def test_build_chat_model_client_configures_groq():
+    from ai_hq.chat.free_model_router import FreeModelRouter
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_groq_api_key="groq-secret",
+        free_ai_groq_model="groq-model",
+    )
+
+    client = build_chat_model_client(settings)
+
+    assert isinstance(client, FreeModelRouter)
+    assert len(client.providers) == 1
+
+    provider = client.providers[0]
+
+    assert provider.name == "groq"
+    assert provider.client.base_url == "https://api.groq.com/openai/v1"
+    assert provider.client.model == "groq-model"
+    assert provider.client.api_key == "groq-secret"
+    assert provider.zero_cost_policy == "free_allowance"
+
+
+def test_build_chat_model_client_locks_openrouter_to_free_router():
+    from ai_hq.chat.free_model_router import FreeModelRouter
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_openrouter_api_key="openrouter-secret",
+    )
+
+    client = build_chat_model_client(settings)
+
+    assert isinstance(client, FreeModelRouter)
+    assert len(client.providers) == 1
+
+    provider = client.providers[0]
+
+    assert provider.name == "openrouter"
+    assert provider.client.base_url == "https://openrouter.ai/api/v1"
+    assert provider.client.model == "openrouter/free"
+    assert provider.client.api_key == "openrouter-secret"
+    assert provider.zero_cost_policy == "explicitly_free"
+
+
+def test_build_chat_model_client_configures_explicit_huggingface_route():
+    from ai_hq.chat.free_model_router import FreeModelRouter
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_hf_token="hf-secret",
+        free_ai_hf_model="explicit-free-model",
+    )
+
+    client = build_chat_model_client(settings)
+
+    assert isinstance(client, FreeModelRouter)
+    assert len(client.providers) == 1
+
+    provider = client.providers[0]
+
+    assert provider.name == "huggingface"
+    assert provider.client.base_url == "https://router.huggingface.co/v1"
+    assert provider.client.model == "explicit-free-model"
+    assert provider.client.api_key == "hf-secret"
+    assert provider.zero_cost_policy == "free_allowance"
+
+
+def test_unconfigured_free_providers_are_skipped():
+    from ai_hq.chat.free_model_router import FreeModelRouter
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_openrouter_api_key="openrouter-secret",
+    )
+
+    client = build_chat_model_client(settings)
+
+    assert isinstance(client, FreeModelRouter)
+    assert [provider.name for provider in client.providers] == [
+        "openrouter",
+    ]
+
+
+def test_legacy_chat_model_is_used_only_without_free_providers():
+    from ai_hq.chat.free_model_router import FreeModelRouter
+    from ai_hq.config import Settings
+
+    legacy_only = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        chat_model_base_url="http://legacy.local/v1",
+        chat_model_name="legacy-model",
+        chat_model_api_key="legacy-secret",
+    )
+
+    legacy_client = build_chat_model_client(legacy_only)
+
+    assert isinstance(
+        legacy_client,
+        OpenAICompatibleChatModelClient,
+    )
+    assert legacy_client.model == "legacy-model"
+
+    free_and_legacy = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        chat_model_base_url="http://legacy.local/v1",
+        chat_model_name="legacy-model",
+        chat_model_api_key="legacy-secret",
+        free_ai_openrouter_api_key="openrouter-secret",
+    )
+
+    free_client = build_chat_model_client(free_and_legacy)
+
+    assert isinstance(free_client, FreeModelRouter)
+    assert [provider.name for provider in free_client.providers] == [
+        "openrouter",
+    ]
+
+
+def test_local_provider_requires_model_when_base_url_is_configured():
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_local_base_url="http://127.0.0.1:11434/v1",
+        free_ai_local_model=None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="FREE_AI_LOCAL_MODEL",
+    ):
+        build_chat_model_client(settings)
+
+
+def test_groq_requires_model_when_key_is_configured():
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_groq_api_key="groq-secret",
+        free_ai_groq_model=None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="FREE_AI_GROQ_MODEL",
+    ):
+        build_chat_model_client(settings)
+
+
+def test_huggingface_requires_explicit_model():
+    from ai_hq.config import Settings
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        redis_url="redis://localhost:6379/15",
+        free_ai_hf_token="hf-secret",
+        free_ai_hf_model=None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="FREE_AI_HF_MODEL",
+    ):
+        build_chat_model_client(settings)

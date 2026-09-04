@@ -106,10 +106,106 @@ class OpenAICompatibleChatModelClient:
 
         return content.strip()
 
-
 def build_chat_model_client(
     settings: Settings,
 ) -> ChatModelClient | None:
+    from ai_hq.chat.free_model_router import (
+        FreeModelProvider,
+        FreeModelRouter,
+    )
+
+    providers: list[FreeModelProvider] = []
+
+    timeout = settings.free_ai_timeout_seconds
+
+    # 1. Local OpenAI-compatible inference.
+    if settings.free_ai_local_base_url:
+        if not settings.free_ai_local_model:
+            raise ValueError(
+                "AI_HQ_FREE_AI_LOCAL_MODEL is required when "
+                "AI_HQ_FREE_AI_LOCAL_BASE_URL is configured"
+            )
+
+        providers.append(
+            FreeModelProvider(
+                name="local",
+                client=OpenAICompatibleChatModelClient(
+                    base_url=settings.free_ai_local_base_url,
+                    model=settings.free_ai_local_model,
+                    api_key=settings.free_ai_local_api_key,
+                    timeout_seconds=timeout,
+                ),
+                zero_cost_policy="local",
+            )
+        )
+
+    # 2. Groq free allowance.
+    if settings.free_ai_groq_api_key:
+        if not settings.free_ai_groq_model:
+            raise ValueError(
+                "AI_HQ_FREE_AI_GROQ_MODEL is required when "
+                "AI_HQ_FREE_AI_GROQ_API_KEY is configured"
+            )
+
+        providers.append(
+            FreeModelProvider(
+                name="groq",
+                client=OpenAICompatibleChatModelClient(
+                    base_url="https://api.groq.com/openai/v1",
+                    model=settings.free_ai_groq_model,
+                    api_key=settings.free_ai_groq_api_key,
+                    timeout_seconds=timeout,
+                ),
+                zero_cost_policy="free_allowance",
+            )
+        )
+
+    # 3. OpenRouter's explicitly free router.
+    #
+    # The model identifier is deliberately not configurable.
+    # This prevents configuration from silently substituting a paid
+    # OpenRouter model.
+    if settings.free_ai_openrouter_api_key:
+        providers.append(
+            FreeModelProvider(
+                name="openrouter",
+                client=OpenAICompatibleChatModelClient(
+                    base_url="https://openrouter.ai/api/v1",
+                    model="openrouter/free",
+                    api_key=settings.free_ai_openrouter_api_key,
+                    timeout_seconds=timeout,
+                ),
+                zero_cost_policy="explicitly_free",
+            )
+        )
+
+    # 4. Hugging Face requires an explicitly selected model.
+    if settings.free_ai_hf_token:
+        if not settings.free_ai_hf_model:
+            raise ValueError(
+                "AI_HQ_FREE_AI_HF_MODEL is required when "
+                "AI_HQ_FREE_AI_HF_TOKEN is configured"
+            )
+
+        providers.append(
+            FreeModelProvider(
+                name="huggingface",
+                client=OpenAICompatibleChatModelClient(
+                    base_url="https://router.huggingface.co/v1",
+                    model=settings.free_ai_hf_model,
+                    api_key=settings.free_ai_hf_token,
+                    timeout_seconds=timeout,
+                ),
+                zero_cost_policy="free_allowance",
+            )
+        )
+
+    if providers:
+        return FreeModelRouter(providers)
+
+    # Backwards compatibility with the original single-provider
+    # configuration. It remains separate from FreeModelRouter because
+    # legacy configuration is not automatically classified as free.
     if not settings.chat_model_base_url:
         return None
 

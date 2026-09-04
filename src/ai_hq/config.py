@@ -35,6 +35,23 @@ class Settings(BaseSettings):
     chat_model_api_key: str | None = None
     chat_model_timeout_seconds: float = 15.0
 
+    # Free-first conversational AI providers.
+    # Provider priority is enforced by build_chat_model_client:
+    # local -> Groq -> OpenRouter free -> Hugging Face.
+    free_ai_local_base_url: str | None = None
+    free_ai_local_model: str | None = None
+    free_ai_local_api_key: str | None = None
+
+    free_ai_groq_api_key: str | None = None
+    free_ai_groq_model: str | None = None
+
+    free_ai_openrouter_api_key: str | None = None
+
+    free_ai_hf_token: str | None = None
+    free_ai_hf_model: str | None = None
+
+    free_ai_timeout_seconds: float = 15.0
+
     @property
     def is_production(self) -> bool:
         return self.environment.casefold() == "production"
