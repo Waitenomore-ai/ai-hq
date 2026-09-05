@@ -134,6 +134,30 @@ class RecoveryService:
         except Exception as exc:
             raise RecoveryPersistenceError("active recovery incident read failed") from exc
 
+    def update_diagnostics(
+        self,
+        incident_id: str,
+        diagnostics: Mapping[str, Any],
+    ) -> RecoveryIncident:
+        now = self._now()
+        try:
+            with self.session_factory() as db:
+                incident = db.get(RecoveryIncident, incident_id)
+                if incident is None:
+                    raise KeyError(f"recovery incident not found: {incident_id}")
+                if incident.active_key is None:
+                    raise ValueError("terminal recovery incident cannot accept diagnostics")
+
+                incident.diagnostics = _bounded_mapping(diagnostics)
+                incident.last_observed_at = now
+                db.commit()
+                db.refresh(incident)
+                return incident
+        except (KeyError, ValueError):
+            raise
+        except Exception as exc:
+            raise RecoveryPersistenceError("failed to update recovery diagnostics") from exc
+
     def observe_failure(
         self,
         component: str,
