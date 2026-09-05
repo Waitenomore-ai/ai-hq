@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ai_hq.delivery.models import Delivery
+from ai_hq.delivery.models import Delivery, QAResult
 from ai_hq.delivery.service import DeliveryService
 
 
@@ -51,5 +51,34 @@ class DeliveryRuntime:
             change_ref=change_ref,
             summary=summary,
             changed_files=list(changed_files or []),
+            evidence=dict(evidence),
+        )
+
+    def handoff_to_qa(
+        self,
+        *,
+        mission_id: str,
+        change_ref: str,
+        result: QAResult | str,
+        evidence: dict[str, Any],
+    ) -> Delivery:
+        """
+        Persist QA's assessment of the exact Developer proposal.
+
+        DeliveryService remains responsible for immutable change-reference
+        validation and creation of human approval after QA PASS.
+        """
+        change_ref = change_ref.strip()
+
+        if not change_ref:
+            raise ValueError("change_ref is required")
+
+        if not evidence:
+            raise ValueError("QA evidence is required")
+
+        return self.delivery_service.record_qa_result(
+            mission_id=mission_id,
+            change_ref=change_ref,
+            result=result,
             evidence=dict(evidence),
         )
