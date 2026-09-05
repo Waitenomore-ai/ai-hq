@@ -45,5 +45,9 @@ jobs:
             tests/test_recovery_models.py \
             tests/test_recovery_policy.py \
             tests/test_service_recover_adapter.py \
+            tests/test_host_helper_recovery.py \
+            tests/test_host_helper_contracts.py \
+            tests/test_host_helper_executor.py \
             tests/test_operational_adapters.py \
-            tests/test_operational_bootstrap.py
+            tests/test_operational_bootstrap.py \
+            tests/test_operational_host_helper_transport.py
