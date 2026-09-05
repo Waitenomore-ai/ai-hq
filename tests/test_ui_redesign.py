@@ -1,3 +1,4 @@
+from pathlib import Path
 
 
 def test_home_exposes_csrf_token_for_sysadmin_chat():
@@ -96,3 +97,33 @@ def test_sysadmin_markdown_renderer_preserves_structure():
     assert "sysadmin-chat__markdown-paragraph" in source
     assert "renderMarkdown(body, content);" in source
     assert ".innerHTML" not in source
+
+def test_operations_floor_exposes_developer_and_qa_rooms():
+    """RED: delivery agents must be visible on the Operations Floor."""
+    template = Path("src/ai_hq/templates/home.html").read_text()
+
+    assert 'data-room-key="developer"' in template
+    assert ">Developer<" in template
+    assert 'data-room-key="qa"' in template
+    assert ">QA<" in template
+
+
+def test_operations_floor_exposes_delivery_pipeline():
+    """RED: HQ must visibly show Developer -> QA -> human approval."""
+    template = Path("src/ai_hq/templates/home.html").read_text()
+
+    assert 'data-delivery-pipeline' in template
+    assert 'data-delivery-stage="developer"' in template
+    assert 'data-delivery-stage="qa"' in template
+    assert 'data-delivery-stage="approval"' in template
+    assert "Your Approval" in template
+
+
+def test_delivery_rooms_support_visible_workflow_states():
+    """RED: the browser renderer must understand delivery-stage states."""
+    script = Path("src/ai_hq/static/hq.js").read_text()
+
+    assert "developer" in script
+    assert "qa" in script
+    assert "WAITING_APPROVAL" in script
+    assert "PASSED" in script

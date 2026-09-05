@@ -56,6 +56,44 @@
     </section>
 
     <section class="hq-stage" aria-label="Top-down AI HQ floor">
+
+        <section class="hq-delivery-pipeline" data-delivery-pipeline aria-label="Delivery pipeline">
+          <div class="hq-delivery-pipeline__title">
+            <span>Delivery Pipeline</span>
+            <strong>Developer → QA → Your Approval</strong>
+          </div>
+
+          <div class="hq-delivery-pipeline__stages">
+            <div class="hq-delivery-stage" data-delivery-stage="developer" data-stage-state="IDLE">
+              <span class="hq-delivery-stage__number">01</span>
+              <span class="hq-delivery-stage__copy">
+                <strong>Developer</strong>
+                <small data-delivery-status>Idle</small>
+              </span>
+            </div>
+
+            <span class="hq-delivery-pipeline__arrow" aria-hidden="true">→</span>
+
+            <div class="hq-delivery-stage" data-delivery-stage="qa" data-stage-state="IDLE">
+              <span class="hq-delivery-stage__number">02</span>
+              <span class="hq-delivery-stage__copy">
+                <strong>QA</strong>
+                <small data-delivery-status>Idle</small>
+              </span>
+            </div>
+
+            <span class="hq-delivery-pipeline__arrow" aria-hidden="true">→</span>
+
+            <div class="hq-delivery-stage" data-delivery-stage="approval" data-stage-state="IDLE">
+              <span class="hq-delivery-stage__number">03</span>
+              <span class="hq-delivery-stage__copy">
+                <strong>Your Approval</strong>
+                <small data-delivery-status>Not ready</small>
+              </span>
+            </div>
+          </div>
+        </section>
+
       <div class="hq-viewport" data-hq-viewport tabindex="0" aria-label="Scrollable operations floor">
         <div class="hq-floor" data-floor-key="operations">
           <div class="hq-corridor hq-corridor--vertical" aria-hidden="true"></div>
@@ -80,6 +118,43 @@
             </span>
             <span class="hq-room__status" data-room-status>Status: Offline</span>
             <span class="hq-room__mission" data-room-mission>No active mission</span>
+          </button>
+
+
+          <button class="hq-room hq-room--developer" type="button"
+                  data-room-key="developer"
+                  data-agent-state="IDLE"
+                  data-room-state="IDLE">
+            <span class="hq-room__head">
+              <span>Developer</span>
+              <span class="hq-light" data-room-light></span>
+            </span>
+            <span class="hq-room__interior">
+              <span class="hq-dev-terminal" aria-hidden="true">
+                <span>&lt;/&gt;</span>
+              </span>
+              <span class="hq-avatar" data-agent-avatar aria-hidden="true"><span></span></span>
+            </span>
+            <span class="hq-room__status" data-room-status>Status: Idle</span>
+            <span class="hq-room__mission" data-room-mission>Ready for development work</span>
+          </button>
+
+          <button class="hq-room hq-room--qa" type="button"
+                  data-room-key="qa"
+                  data-agent-state="IDLE"
+                  data-room-state="IDLE">
+            <span class="hq-room__head">
+              <span>QA</span>
+              <span class="hq-light" data-room-light></span>
+            </span>
+            <span class="hq-room__interior">
+              <span class="hq-qa-console" aria-hidden="true">
+                <span>✓</span>
+              </span>
+              <span class="hq-avatar" data-agent-avatar aria-hidden="true"><span></span></span>
+            </span>
+            <span class="hq-room__status" data-room-status>Status: Idle</span>
+            <span class="hq-room__mission" data-room-mission>Waiting for Developer</span>
           </button>
 
           <button class="hq-room hq-room--approvals hq-room--shared" type="button" data-room-key="approvals" data-room-state="IDLE" data-shared-room="true">

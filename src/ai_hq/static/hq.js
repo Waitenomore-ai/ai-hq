@@ -1,6 +1,6 @@
 (() => {
   const rootPath = document.body.dataset.rootPath || "";
-  const knownStates = new Set(["WORKING", "WAITING_APPROVAL", "IDLE", "FAILED", "OFFLINE"]);
+  const knownStates = new Set(["WORKING", "WAITING_APPROVAL", "PASSED", "IDLE", "FAILED", "OFFLINE"]);
   const connection = document.querySelector("[data-connection-status]");
   const detailEmpty = document.querySelector("[data-detail-empty]");
   const detailContent = document.querySelector("[data-detail-content]");
@@ -13,6 +13,31 @@
   );
   let latestRooms = new Map();
   let selectedRoomKey = null;
+
+  const deliveryStages = {
+    developer: document.querySelector('[data-delivery-stage="developer"]'),
+    qa: document.querySelector('[data-delivery-stage="qa"]'),
+    approval: document.querySelector('[data-delivery-stage="approval"]'),
+  };
+
+  const renderDeliveryStage = (key, state, fallback) => {
+    const element = deliveryStages[key];
+    if (!element) return;
+
+    const normalized = knownStates.has(state) ? state : fallback;
+    element.dataset.stageState = normalized;
+
+    const status = element.querySelector("[data-delivery-status]");
+    if (status) {
+      if (key === "approval" && normalized === "IDLE") {
+        status.textContent = "Not ready";
+      } else if (key === "approval" && normalized === "WAITING_APPROVAL") {
+        status.textContent = "Waiting for you";
+      } else {
+        status.textContent = readableState(normalized);
+      }
+    }
+  };
 
   const readableState = (state) => {
     const normalized = knownStates.has(state) ? state : "OFFLINE";
@@ -112,6 +137,30 @@
       const normalized = Array.isArray(payload.rooms) ? payload.rooms.map(normalizeRoom) : [];
       latestRooms = new Map(normalized.map((room) => [room.key, room]));
       normalized.forEach(renderRoom);
+
+      const developer = latestRooms.get("developer");
+      const qa = latestRooms.get("qa");
+      const approvals = latestRooms.get("approvals");
+
+      renderDeliveryStage(
+        "developer",
+        developer ? developer.state : "IDLE",
+        "IDLE"
+      );
+
+      renderDeliveryStage(
+        "qa",
+        qa ? qa.state : "IDLE",
+        "IDLE"
+      );
+
+      renderDeliveryStage(
+        "approval",
+        approvals && (approvals.count ?? 0) > 0
+          ? "WAITING_APPROVAL"
+          : "IDLE",
+        "IDLE"
+      );
 
       if (connection) {
         connection.textContent = "State feed online";

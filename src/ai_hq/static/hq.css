@@ -448,3 +448,154 @@ button { color: inherit; }
 .sysadmin-chat__message-body code {
   white-space: normal;
 }
+
+
+/* ==========================================================
+   Delivery Pipeline — Developer -> QA -> Human Approval
+   ========================================================== */
+
+.hq-delivery-pipeline {
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(130, 165, 255, 0.28);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(34, 48, 83, 0.92), rgba(15, 20, 34, 0.96));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+}
+
+.hq-delivery-pipeline__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hq-delivery-pipeline__title span {
+  opacity: 0.62;
+  font-size: 0.72rem;
+}
+
+.hq-delivery-pipeline__title strong {
+  font-size: 0.82rem;
+}
+
+.hq-delivery-pipeline__stages {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.hq-delivery-stage {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.hq-delivery-stage__number {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.hq-delivery-stage__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hq-delivery-stage__copy small {
+  opacity: 0.66;
+}
+
+.hq-delivery-pipeline__arrow {
+  opacity: 0.45;
+  font-size: 1.25rem;
+}
+
+.hq-delivery-stage[data-stage-state="WORKING"] {
+  border-color: rgba(77, 166, 255, 0.75);
+  box-shadow: 0 0 22px rgba(77, 166, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.hq-delivery-stage[data-stage-state="PASSED"] {
+  border-color: rgba(85, 214, 143, 0.75);
+  box-shadow: 0 0 22px rgba(85, 214, 143, 0.18);
+}
+
+.hq-delivery-stage[data-stage-state="WAITING_APPROVAL"] {
+  border-color: rgba(255, 193, 77, 0.9);
+  box-shadow: 0 0 26px rgba(255, 193, 77, 0.22);
+  transform: translateY(-1px);
+}
+
+.hq-delivery-stage[data-stage-state="FAILED"] {
+  border-color: rgba(255, 92, 92, 0.85);
+  box-shadow: 0 0 22px rgba(255, 92, 92, 0.18);
+}
+
+.hq-room--developer,
+.hq-room--qa {
+  border-color: rgba(130, 165, 255, 0.28);
+}
+
+.hq-room--developer[data-room-state="WORKING"],
+.hq-room--qa[data-room-state="WORKING"] {
+  box-shadow: inset 0 0 0 1px rgba(77, 166, 255, 0.42),
+              0 0 26px rgba(77, 166, 255, 0.16);
+}
+
+.hq-room--qa[data-room-state="PASSED"] {
+  box-shadow: inset 0 0 0 1px rgba(85, 214, 143, 0.45),
+              0 0 26px rgba(85, 214, 143, 0.16);
+}
+
+.hq-dev-terminal,
+.hq-qa-console {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 42px;
+  border: 1px solid rgba(130, 165, 255, 0.35);
+  border-radius: 7px;
+  background: rgba(6, 12, 24, 0.72);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+@media (max-width: 900px) {
+  .hq-delivery-pipeline__title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .hq-delivery-pipeline__stages {
+    grid-template-columns: 1fr;
+  }
+
+  .hq-delivery-pipeline__arrow {
+    transform: rotate(90deg);
+    justify-self: center;
+  }
+}
