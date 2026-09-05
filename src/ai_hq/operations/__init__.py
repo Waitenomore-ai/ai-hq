@@ -1,6 +1,7 @@
 from ai_hq.operations.adapters import (
     OperationalTransport,
     ServiceLogsAdapter,
+    ServiceRecoverAdapter,
     ServiceRestartAdapter,
     ServiceStatusAdapter,
     SystemHealthAdapter,
@@ -26,6 +27,7 @@ __all__ = [
     "ServiceStatusAdapter",
     "ServiceLogsAdapter",
     "ServiceRestartAdapter",
+    "ServiceRecoverAdapter",
     "HostHelperOperationalTransport",
     "OperationalHostTransport",
     "operational_adapters",
