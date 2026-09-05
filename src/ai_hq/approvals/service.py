@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 
 from ai_hq.approvals.models import ApprovalRequest, ApprovalState, ScopedApprovalRule
 from ai_hq.missions.models import MissionRisk
@@ -171,17 +171,42 @@ class ApprovalService:
             return None
 
     def consume_rule(self, rule_id: str) -> ScopedApprovalRule:
+        now = datetime.now(UTC)
         with self.session_factory() as db:
+            result = db.execute(
+                update(ScopedApprovalRule)
+                .where(
+                    ScopedApprovalRule.id == rule_id,
+                    ScopedApprovalRule.risk != MissionRisk.RED,
+                    ScopedApprovalRule.expires_at > now,
+                    or_(
+                        ScopedApprovalRule.max_execution_count.is_(None),
+                        ScopedApprovalRule.execution_count
+                        < ScopedApprovalRule.max_execution_count,
+                    ),
+                )
+                .values(
+                    execution_count=ScopedApprovalRule.execution_count + 1,
+                )
+            )
+
+            if result.rowcount == 1:
+                db.commit()
+                rule = db.get(ScopedApprovalRule, rule_id)
+                if rule is None:
+                    raise KeyError(f"scoped approval rule not found: {rule_id}")
+                return rule
+
             rule = db.get(ScopedApprovalRule, rule_id)
             if rule is None:
                 raise KeyError(f"scoped approval rule not found: {rule_id}")
             if rule.risk is MissionRisk.RED:
                 raise ValueError("red actions cannot be authorized by scoped rules")
-            if _utc(rule.expires_at) <= datetime.now(UTC):
+            if _utc(rule.expires_at) <= now:
                 raise ValueError("scoped approval rule expired")
-            if rule.max_execution_count is not None and rule.execution_count >= rule.max_execution_count:
+            if (
+                rule.max_execution_count is not None
+                and rule.execution_count >= rule.max_execution_count
+            ):
                 raise ValueError("scoped approval rule execution limit reached")
-            rule.execution_count += 1
-            db.commit()
-            db.refresh(rule)
-            return rule
+            raise ValueError("scoped approval rule could not be consumed")
