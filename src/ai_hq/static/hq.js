@@ -196,7 +196,7 @@
   }
 
   function renderMarkdown(target, content) {
-    content = content.replace(/\\([*`~_#])/g, "\$1");
+    content = content.replace(/\\([*`~_#])/g, "$1");
     const inline = (parent, text) => {
       const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
       parts.filter(Boolean).forEach((part) => {
