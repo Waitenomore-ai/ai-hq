@@ -11,14 +11,20 @@ from ai_hq.ledger.service import OperationsLedger
 from ai_hq.missions.service import MissionService
 from ai_hq.missions.executor import MissionExecutor
 from ai_hq.missions.worker import AutonomousMissionRunner
-from ai_hq.operations.adapters import ServiceLogsAdapter, ServiceStatusAdapter, SystemHealthAdapter
+from ai_hq.operations.adapters import (
+    ServiceLogsAdapter,
+    ServiceRecoverAdapter,
+    ServiceStatusAdapter,
+    SystemHealthAdapter,
+)
 from ai_hq.operations.targets import OperationalTarget, OperationalTargetRegistry
 from ai_hq.operations.transport import HostHelperOperationalTransport
-from ai_hq.tool_gateway.registry import ToolRegistry
-from ai_hq.tool_gateway.service import ToolGateway
 from ai_hq.queue import redis_ping
+from ai_hq.recovery.bootstrap import RecoveryWorkerCoordinator, build_recovery_coordinator
 from ai_hq.safety.service import SafetyService
 from ai_hq.system_state import ensure_system_state
+from ai_hq.tool_gateway.registry import ToolRegistry
+from ai_hq.tool_gateway.service import ToolGateway
 
 
 def execution_allowed(mode: OperatingMode) -> bool:
@@ -62,7 +68,6 @@ def build_department_runner(settings: Settings) -> DepartmentRunner:
     )
 
 
-
 def build_autonomous_mission_runner(
     settings: Settings,
     *,
@@ -75,9 +80,8 @@ def build_autonomous_mission_runner(
 
         AutonomousMissionRunner -> MissionExecutor -> ToolGateway
 
-    The default worker registry is intentionally empty. Real operational
-    capabilities remain fail-closed until trusted production configuration
-    is explicitly installed and verified.
+    Automatic recovery adds only the fixed ``service.recover`` adapter. It
+    does not register generic restart/deploy/rollback mutation capabilities.
     """
     if session_factory is None:
         session_factory = get_session_factory()
@@ -107,13 +111,20 @@ def build_autonomous_mission_runner(
                     "service.status.read",
                     "service.logs.read",
                 }),
-            )
+            ),
+            OperationalTarget(
+                key="dripvid",
+                service_unit="dripvid.service",
+                log_unit="dripvid.service",
+                allowed_capabilities=frozenset({"service.recover"}),
+            ),
         ])
 
         registry = ToolRegistry([
             SystemHealthAdapter(targets=targets, transport=transport),
             ServiceStatusAdapter(targets=targets, transport=transport),
             ServiceLogsAdapter(targets=targets, transport=transport),
+            ServiceRecoverAdapter(targets=targets, transport=transport),
         ])
 
     gateway = ToolGateway(
@@ -138,18 +149,30 @@ def run_worker_iteration(
     *,
     autonomous_runner: AutonomousMissionRunner,
     department_runner: DepartmentRunner,
+    recovery_coordinator: RecoveryWorkerCoordinator | None = None,
+    settings: Settings | None = None,
 ) -> bool:
-    """
-    Execute at most one unit of worker activity.
+    """Execute at most one unit of worker activity.
 
-    Persisted autonomous plans are routed through MissionExecutor and
-    ToolGateway first. Legacy unplanned missions remain handled by the
-    existing DepartmentRunner fallback.
+    Recovery observation may create a persisted mission, but autonomous
+    mission execution remains the first executable worker path. Any mutation
+    still happens later through MissionExecutor -> ToolGateway.
     """
-    if autonomous_runner.run_once() is not None:
+    recovery_worked = False
+    if recovery_coordinator is not None and settings is not None:
+        recovery_worked = recovery_coordinator.run_if_due(settings)
+
+    autonomous_result = autonomous_runner.run_once()
+    if autonomous_result is not None:
+        if recovery_coordinator is not None:
+            recovery_coordinator.handle_execution_result(autonomous_result)
         return True
 
-    return bool(department_runner.run_once())
+    if department_runner.run_once():
+        return True
+
+    return recovery_worked
+
 
 def run_worker() -> int:
     settings = get_settings()
@@ -159,6 +182,8 @@ def run_worker() -> int:
 
     autonomous_runner = None
     department_runner = None
+    recovery_coordinator = None
+    recovery_initialized = False
 
     while True:
         settings = get_settings()
@@ -173,9 +198,15 @@ def run_worker() -> int:
         if department_runner is None:
             department_runner = build_department_runner(settings)
 
+        if not recovery_initialized:
+            recovery_coordinator = build_recovery_coordinator(settings)
+            recovery_initialized = True
+
         worked = run_worker_iteration(
             autonomous_runner=autonomous_runner,
             department_runner=department_runner,
+            recovery_coordinator=recovery_coordinator,
+            settings=settings,
         )
 
         if not worked:
