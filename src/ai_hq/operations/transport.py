@@ -60,10 +60,11 @@ class HostHelperOperationalTransport:
         self,
         target: OperationalTarget,
     ) -> dict[str, object]:
+        helper_target = target.host_helper_service_target or target.key
         return self._execute(
             HelperRequest(
                 capability=HostCapability.SERVICE_STATUS,
-                target=target.key,
+                target=helper_target,
                 params={},
             )
         )
@@ -82,10 +83,11 @@ class HostHelperOperationalTransport:
         ):
             raise ToolAdapterError("invalid_log_line_count")
 
+        helper_target = target.host_helper_log_target or target.key
         return self._execute(
             HelperRequest(
                 capability=HostCapability.LOGS_RECENT,
-                target=target.key,
+                target=helper_target,
                 params={"lines": lines},
             )
         )
