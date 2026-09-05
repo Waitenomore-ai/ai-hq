@@ -102,6 +102,20 @@ class HostHelperOperationalTransport:
             )
         )
 
+    def service_recover(
+        self,
+        target: OperationalTarget,
+        *,
+        component: str,
+    ) -> dict[str, object]:
+        return self._execute(
+            HelperRequest(
+                capability=HostCapability.SERVICE_RECOVER,
+                target=target.key,
+                params={"component": component},
+            )
+        )
+
     def deployment_deploy(
         self,
         target: OperationalTarget,
