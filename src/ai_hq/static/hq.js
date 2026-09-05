@@ -195,6 +195,55 @@
     status.textContent = text;
   }
 
+  function renderMarkdown(target, content) {
+    const inline = (parent, text) => {
+      const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+      parts.filter(Boolean).forEach((part) => {
+        if (part.startsWith("`") && part.endsWith("`")) {
+          const code = document.createElement("code");
+          code.textContent = part.slice(1, -1);
+          parent.appendChild(code);
+        } else if (part.startsWith("**") && part.endsWith("**")) {
+          const strong = document.createElement("strong");
+          strong.textContent = part.slice(2, -2);
+          parent.appendChild(strong);
+        } else {
+          parent.appendChild(document.createTextNode(part));
+        }
+      });
+    };
+
+    let list = null;
+    content.split(/\r?\n/).forEach((line) => {
+      if (!line.trim()) {
+        list = null;
+        return;
+      }
+      const heading = line.match(/^(#{1,3})\s+(.+)$/);
+      const bullet = line.match(/^[-*]\s+(.+)$/);
+      let element;
+      if (heading) {
+        list = null;
+        element = document.createElement(`h${heading[1].length + 3}`);
+        inline(element, heading[2]);
+        target.appendChild(element);
+      } else if (bullet) {
+        if (!list) {
+          list = document.createElement("ul");
+          target.appendChild(list);
+        }
+        element = document.createElement("li");
+        inline(element, bullet[1]);
+        list.appendChild(element);
+      } else {
+        list = null;
+        element = document.createElement("p");
+        inline(element, line);
+        target.appendChild(element);
+      }
+    });
+  }
+
   function appendMessage(role, content) {
     if (!content) {
       return;
@@ -210,7 +259,7 @@
 
     const body = document.createElement("div");
     body.className = "sysadmin-chat__message-body";
-    body.textContent = content;
+    renderMarkdown(body, content);
 
     row.append(author, body);
     messages.appendChild(row);

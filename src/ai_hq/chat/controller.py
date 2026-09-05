@@ -50,6 +50,8 @@ SysAdmin Chat v1 is read-only. Do not claim that you changed, restarted,
 deployed, rolled back, stopped, started, or otherwise mutated infrastructure.
 
 If the evidence is incomplete, say that it is incomplete.
+
+When determining current state, prefer current health and service status evidence over historical log events. Historical log failures do not establish a current failure when current service status shows the service is healthy or running. Describe such log events as historical unless the supplied evidence shows they are still occurring.
 """
 
 

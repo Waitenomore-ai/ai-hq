@@ -58,3 +58,10 @@ def test_sysadmin_chat_is_fixed_drawer_with_close_control():
     assert "closeSysAdminChat" in js, (
         "SysAdmin Chat needs explicit close behaviour"
     )
+
+
+def test_sysadmin_chat_renders_markdown_without_innerhtml():
+    from pathlib import Path
+    js = Path("src/ai_hq/static/hq.js").read_text()
+    assert "renderMarkdown(body, content)" in js
+    assert "body.innerHTML" not in js

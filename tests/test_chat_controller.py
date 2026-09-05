@@ -365,3 +365,13 @@ def test_cannot_refresh_another_conversations_mission(session_factory):
             conversation_id=second.id,
             mission_id=submitted.mission_id,
         )
+
+
+def test_sysadmin_v2_current_status_outranks_historical_log_failures():
+    from ai_hq.chat.controller import GROUNDED_SYSTEM_PROMPT
+    prompt = GROUNDED_SYSTEM_PROMPT.lower()
+    assert "current" in prompt
+    assert "historical" in prompt
+    assert "service status" in prompt
+    assert any(x in prompt for x in ("outrank", "takes precedence", "prefer"))
+    assert any(x in prompt for x in ("still occurring", "currently occurring", "current failure"))
