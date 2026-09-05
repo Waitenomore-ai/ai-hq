@@ -3,6 +3,7 @@ from ai_hq.operations.adapters import (
     DeploymentRollbackAdapter,
     OperationalTransport,
     ServiceLogsAdapter,
+    ServiceRecoverAdapter,
     ServiceRestartAdapter,
     ServiceStatusAdapter,
     SystemHealthAdapter,
@@ -20,6 +21,7 @@ def operational_adapters(
     ServiceStatusAdapter,
     ServiceLogsAdapter,
     ServiceRestartAdapter,
+    ServiceRecoverAdapter,
     DeploymentDeployAdapter,
     DeploymentRollbackAdapter,
 ]:
@@ -28,6 +30,7 @@ def operational_adapters(
         ServiceStatusAdapter(targets=targets, transport=transport),
         ServiceLogsAdapter(targets=targets, transport=transport),
         ServiceRestartAdapter(targets=targets, transport=transport),
+        ServiceRecoverAdapter(targets=targets, transport=transport),
         DeploymentDeployAdapter(targets=targets, transport=transport),
         DeploymentRollbackAdapter(targets=targets, transport=transport),
     )
