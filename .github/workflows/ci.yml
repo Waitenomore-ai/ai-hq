@@ -43,4 +43,7 @@ jobs:
           python -m pytest -q \
             tests/test_recovery_config.py \
             tests/test_recovery_models.py \
-            tests/test_recovery_policy.py
+            tests/test_recovery_policy.py \
+            tests/test_service_recover_adapter.py \
+            tests/test_operational_adapters.py \
+            tests/test_operational_bootstrap.py
