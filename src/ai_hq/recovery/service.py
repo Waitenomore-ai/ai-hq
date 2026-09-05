@@ -296,6 +296,51 @@ class RecoveryService:
         except Exception as exc:
             raise RecoveryPersistenceError("failed to evaluate recovery limits") from exc
 
+    def attach_mission(
+        self,
+        incident_id: str,
+        mission_id: str,
+    ) -> RecoveryIncident:
+        if not mission_id:
+            raise ValueError("recovery mission id is required")
+
+        try:
+            with self.session_factory() as db:
+                attached = db.execute(
+                    update(RecoveryIncident)
+                    .where(
+                        RecoveryIncident.id == incident_id,
+                        RecoveryIncident.active_key.is_not(None),
+                        RecoveryIncident.state
+                        == RecoveryIncidentState.RECOVERY_PENDING,
+                        RecoveryIncident.recovery_mission_id.is_(None),
+                    )
+                    .values(recovery_mission_id=mission_id)
+                )
+
+                if attached.rowcount == 1:
+                    db.commit()
+                    incident = db.get(RecoveryIncident, incident_id)
+                    if incident is None:
+                        raise RecoveryPersistenceError(
+                            "attached recovery incident disappeared"
+                        )
+                    return incident
+
+                db.rollback()
+                incident = db.get(RecoveryIncident, incident_id)
+                if incident is None:
+                    raise KeyError(f"recovery incident not found: {incident_id}")
+                if incident.recovery_mission_id == mission_id:
+                    return incident
+                if incident.recovery_mission_id is not None:
+                    raise ValueError("recovery incident already has a mission")
+                raise ValueError("recovery incident cannot attach a mission")
+        except (KeyError, ValueError, RecoveryPersistenceError):
+            raise
+        except Exception as exc:
+            raise RecoveryPersistenceError("failed to attach recovery mission") from exc
+
     def claim_recovery(self, incident_id: str) -> bool:
         now = self._now()
 
