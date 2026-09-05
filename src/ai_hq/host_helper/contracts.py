@@ -7,10 +7,20 @@ class HostCapability(StrEnum):
     HOST_RESOURCES = "host.resources"
     SERVICE_STATUS = "service.status"
     SERVICE_RESTART = "service.restart"
+    SERVICE_RECOVER = "service.recover"
     DEPLOYMENT_DEPLOY = "deployment.deploy"
     DEPLOYMENT_ROLLBACK = "deployment.rollback"
     CONTAINER_STATUS = "container.status"
     LOGS_RECENT = "logs.recent"
+
+
+RECOVERY_COMPONENT_KEYS = frozenset({
+    "app",
+    "mcp",
+    "proxy",
+    "tunnel",
+    "database",
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,15 +46,24 @@ class HelperResponse:
     error: str | None = None
 
 
-def _validate_target(capability: HostCapability, target: object, allow_lists: HostAllowLists) -> str:
+def _validate_target(
+    capability: HostCapability,
+    target: object,
+    allow_lists: HostAllowLists,
+) -> str:
     if not isinstance(target, str) or not target:
         raise ValueError("unknown target")
+
+    if capability is HostCapability.SERVICE_RECOVER:
+        if target != "dripvid" or target not in allow_lists.services:
+            raise ValueError("unknown target")
+        return target
 
     if capability in {
         HostCapability.SERVICE_STATUS,
         HostCapability.SERVICE_RESTART,
-            HostCapability.DEPLOYMENT_DEPLOY,
-            HostCapability.DEPLOYMENT_ROLLBACK,
+        HostCapability.DEPLOYMENT_DEPLOY,
+        HostCapability.DEPLOYMENT_ROLLBACK,
     }:
         allowed = allow_lists.services
     elif capability is HostCapability.CONTAINER_STATUS:
@@ -57,7 +76,10 @@ def _validate_target(capability: HostCapability, target: object, allow_lists: Ho
     return target
 
 
-def validate_request(payload: dict, allow_lists: HostAllowLists) -> HelperRequest:
+def validate_request(
+    payload: dict,
+    allow_lists: HostAllowLists,
+) -> HelperRequest:
     if not isinstance(payload, dict):
         raise TypeError("invalid request")
 
@@ -76,20 +98,48 @@ def validate_request(payload: dict, allow_lists: HostAllowLists) -> HelperReques
 
     target = payload.get("target")
 
-    if capability in {HostCapability.HOST_HEALTH, HostCapability.HOST_RESOURCES}:
+    if capability in {
+        HostCapability.HOST_HEALTH,
+        HostCapability.HOST_RESOURCES,
+    }:
         if target is not None:
             raise ValueError("target not allowed")
         if params:
             raise ValueError("unknown parameter")
-        return HelperRequest(capability=capability, target=None, params={})
+        return HelperRequest(
+            capability=capability,
+            target=None,
+            params={},
+        )
 
-    validated_target = _validate_target(capability, target, allow_lists)
+    validated_target = _validate_target(
+        capability,
+        target,
+        allow_lists,
+    )
+
+    if capability is HostCapability.SERVICE_RECOVER:
+        if set(params) != {"component"}:
+            raise ValueError("invalid recovery parameters")
+
+        component = params.get("component")
+        if (
+            not isinstance(component, str)
+            or component not in RECOVERY_COMPONENT_KEYS
+        ):
+            raise ValueError("invalid recovery component")
+
+        return HelperRequest(
+            capability=capability,
+            target=validated_target,
+            params={"component": component},
+        )
 
     if capability in {
         HostCapability.SERVICE_STATUS,
         HostCapability.SERVICE_RESTART,
-            HostCapability.DEPLOYMENT_DEPLOY,
-            HostCapability.DEPLOYMENT_ROLLBACK,
+        HostCapability.DEPLOYMENT_DEPLOY,
+        HostCapability.DEPLOYMENT_ROLLBACK,
         HostCapability.CONTAINER_STATUS,
     }:
         if params:
@@ -105,7 +155,11 @@ def validate_request(payload: dict, allow_lists: HostAllowLists) -> HelperReques
         raise ValueError("unknown parameter")
 
     lines = params.get("lines", 100)
-    if isinstance(lines, bool) or not isinstance(lines, int) or not 1 <= lines <= 500:
+    if (
+        isinstance(lines, bool)
+        or not isinstance(lines, int)
+        or not 1 <= lines <= 500
+    ):
         raise ValueError("lines must be an integer between 1 and 500")
 
     return HelperRequest(
