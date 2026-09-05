@@ -8,6 +8,7 @@ from ai_hq.missions.models import Mission
 from ai_hq.models.admin_session import AdminSession
 from ai_hq.models.system_state import SystemState
 from ai_hq.notifications.models import Notification
+from ai_hq.recovery.models import RecoveryAttempt, RecoveryIncident, RecoveryIncidentState
 
 __all__ = [
     "AIUsageRecord",
@@ -20,6 +21,9 @@ __all__ = [
     "LedgerEvent",
     "Mission",
     "Notification",
+    "RecoveryAttempt",
+    "RecoveryIncident",
+    "RecoveryIncidentState",
     "ScopedApprovalRule",
     "SystemState",
 ]
