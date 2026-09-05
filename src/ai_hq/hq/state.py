@@ -2,6 +2,7 @@ from sqlalchemy import func, select
 
 from ai_hq.agents.models import Agent, AgentStatus
 from ai_hq.approvals.models import ApprovalRequest, ApprovalState
+from ai_hq.delivery.models import Delivery, DeliveryStage
 from ai_hq.knowledge.models import KnowledgeMemory
 from ai_hq.missions.models import Mission
 
@@ -88,8 +89,82 @@ class HQStateService:
                     }
                 )
 
+            active_delivery = db.scalar(
+                select(Delivery)
+                .where(
+                    Delivery.stage.in_(
+                        (
+                            DeliveryStage.DEVELOPER,
+                            DeliveryStage.QA,
+                            DeliveryStage.WAITING_APPROVAL,
+                        )
+                    )
+                )
+                .order_by(
+                    Delivery.updated_at.desc(),
+                    Delivery.id.desc(),
+                )
+                .limit(1)
+            )
+
+            delivery_mission = (
+                db.get(Mission, active_delivery.mission_id)
+                if active_delivery is not None
+                else None
+            )
+
+            developer_working = (
+                active_delivery is not None
+                and active_delivery.stage is DeliveryStage.DEVELOPER
+            )
+
+            qa_working = (
+                active_delivery is not None
+                and active_delivery.stage is DeliveryStage.QA
+            )
+
             rooms.extend(
                 [
+                    {
+                        "key": "developer",
+                        "label": "Developer",
+                        "agent": {
+                            "key": "developer",
+                            "display_name": "Developer",
+                        },
+                        "state": (
+                            "WORKING"
+                            if developer_working
+                            else "IDLE"
+                        ),
+                        "mission_title": (
+                            delivery_mission.title
+                            if developer_working
+                            and delivery_mission is not None
+                            else None
+                        ),
+                        "count": None,
+                    },
+                    {
+                        "key": "qa",
+                        "label": "QA",
+                        "agent": {
+                            "key": "qa",
+                            "display_name": "QA",
+                        },
+                        "state": (
+                            "WORKING"
+                            if qa_working
+                            else "IDLE"
+                        ),
+                        "mission_title": (
+                            delivery_mission.title
+                            if qa_working
+                            and delivery_mission is not None
+                            else None
+                        ),
+                        "count": None,
+                    },
                     {
                         "key": "approvals",
                         "label": "Approval Station",
