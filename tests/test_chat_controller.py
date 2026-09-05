@@ -375,3 +375,21 @@ def test_sysadmin_v2_current_status_outranks_historical_log_failures():
     assert "service status" in prompt
     assert any(x in prompt for x in ("outrank", "takes precedence", "prefer"))
     assert any(x in prompt for x in ("still occurring", "currently occurring", "current failure"))
+
+
+
+def test_sysadmin_final_output_normalization_and_current_state_guard():
+    from pathlib import Path
+    from ai_hq.chat.controller import _normalize_sysadmin_output
+
+    assert _normalize_sysadmin_output(
+        r"## \*\*Healthy\*\* \`running\`"
+    ) == "## **Healthy** `running`"
+
+    source = Path("src/ai_hq/chat/controller.py").read_text()
+
+    assert '"classification": "historical_context"' in source
+    assert '"active" in current_status' in source
+    assert '"running" in current_status' in source
+    assert "Historical log failures must not" in source
+    assert "content = _normalize_sysadmin_output(content)" in source

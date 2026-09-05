@@ -62,6 +62,13 @@ class ChatControllerResult:
     mission_id: str | None = None
 
 
+def _normalize_sysadmin_output(content: str) -> str:
+    """Normalize harmless Markdown escapes emitted by chat providers."""
+    for char in ("*", "`", "~", "_", "#"):
+        content = content.replace("\\" + char, char)
+    return content
+
+
 class ChatController:
     """
     Coordinates persisted chat with persisted missions.
@@ -308,6 +315,37 @@ class ChatController:
             for step in steps
         ]
 
+        status_evidence = next(
+            (
+                item for item in evidence
+                if item["tool_name"] == "service.status.read"
+                and item["status"] == "SUCCEEDED"
+            ),
+            None,
+        )
+        logs_evidence = next(
+            (
+                item for item in evidence
+                if item["tool_name"] == "service.logs.read"
+            ),
+            None,
+        )
+
+        if status_evidence is not None and logs_evidence is not None:
+            current_status = json.dumps(
+                status_evidence["result"], sort_keys=True
+            ).lower()
+            if "active" in current_status and "running" in current_status:
+                logs_evidence["result"] = {
+                    "classification": "historical_context",
+                    "current_state": (
+                        "Fresh service.status.read reports the service "
+                        "active/running. Historical log failures must not "
+                        "be described as current, ongoing, persistent, or "
+                        "requiring action."
+                    ),
+                }
+
         if self.model_client is None:
             content = (
                 "The read-only inspection completed, but SysAdmin's "
@@ -338,6 +376,7 @@ class ChatController:
                     GROUNDED_SYSTEM_PROMPT,
                     model_messages,
                 )
+                content = _normalize_sysadmin_output(content)
                 state = "complete"
             except ChatModelError:
                 content = (
