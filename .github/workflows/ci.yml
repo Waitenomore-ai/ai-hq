@@ -56,5 +56,6 @@ jobs:
             tests/test_scoped_rule_consumption.py \
             tests/test_scoped_rule_atomic.py \
             tests/test_recovery_probe.py \
+            tests/test_recovery_service.py \
             tests/test_tool_gateway.py \
             tests/test_safety_service.py
