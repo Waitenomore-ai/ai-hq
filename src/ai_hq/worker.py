@@ -9,6 +9,8 @@ from ai_hq.host_helper.client import HostHelperClient, HostHelperError
 from ai_hq.host_helper.contracts import HostAllowLists
 from ai_hq.ledger.service import OperationsLedger
 from ai_hq.missions.service import MissionService
+from ai_hq.delivery.runtime import DeliveryRuntime
+from ai_hq.delivery.service import DeliveryService
 from ai_hq.missions.executor import MissionExecutor
 from ai_hq.missions.worker import AutonomousMissionRunner
 from ai_hq.operations.adapters import ServiceLogsAdapter, ServiceStatusAdapter, SystemHealthAdapter
@@ -128,9 +130,14 @@ def build_autonomous_mission_runner(
         gateway,
     )
 
+    delivery_runtime = DeliveryRuntime(
+        DeliveryService(session_factory)
+    )
+
     return AutonomousMissionRunner(
         missions=missions,
         executor=executor,
+        delivery_runtime=delivery_runtime,
     )
 
 

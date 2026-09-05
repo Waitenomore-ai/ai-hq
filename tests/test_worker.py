@@ -110,3 +110,62 @@ def test_freeze_mode_never_constructs_or_runs_department_runner(monkeypatch):
 
     def forbidden(_settings):
         raise AssertionError("frozen worker must not construct runner")
+
+
+
+def isolated_session_factory():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from ai_hq.db import Base
+
+    engine = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+
+    return sessionmaker(
+        bind=engine,
+        expire_on_commit=False,
+    )
+
+def test_production_autonomous_runner_wires_delivery_runtime():
+    class FakeSettings:
+        host_helper_credential = None
+        host_helper_socket = "/tmp/test-host-helper.sock"
+
+    runner = worker.build_autonomous_mission_runner(
+        FakeSettings(),
+        session_factory=isolated_session_factory(),
+    )
+
+    assert runner.delivery_runtime is not None
+
+    from ai_hq.delivery.runtime import DeliveryRuntime
+
+    assert isinstance(
+        runner.delivery_runtime,
+        DeliveryRuntime,
+    )
+
+
+def test_production_delivery_runtime_uses_same_session_factory():
+    class FakeSettings:
+        host_helper_credential = None
+        host_helper_socket = "/tmp/test-host-helper.sock"
+
+    factory = isolated_session_factory()
+
+    runner = worker.build_autonomous_mission_runner(
+        FakeSettings(),
+        session_factory=factory,
+    )
+
+    assert runner.delivery_runtime is not None
+    assert (
+        runner.delivery_runtime.delivery_service.session_factory
+        is factory
+    )
