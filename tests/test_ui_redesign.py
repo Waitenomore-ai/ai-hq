@@ -65,3 +65,11 @@ def test_sysadmin_chat_renders_markdown_without_innerhtml():
     js = Path("src/ai_hq/static/hq.js").read_text()
     assert "renderMarkdown(body, content)" in js
     assert "body.innerHTML" not in js
+
+
+def test_sysadmin_chat_normalizes_escaped_markdown():
+    from pathlib import Path
+    js = Path("src/ai_hq/static/hq.js").read_text()
+    assert "content = content.replace" in js
+    assert "renderMarkdown(body, content)" in js
+    assert "body.innerHTML" not in js
