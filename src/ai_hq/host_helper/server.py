@@ -126,6 +126,8 @@ def _default_allow_lists() -> HostAllowLists:
         services=frozenset({"ai-hq", "nginx", "dripvid"}),
         containers=frozenset({"ai-hq-web", "ai-hq-worker"}),
         logs=frozenset({"ai-hq", "nginx", "dripvid"}),
+        diagnostic_services=frozenset({"dripvid-mcp", "cloudflared", "postgresql"}),
+        diagnostic_logs=frozenset({"dripvid-mcp", "cloudflared", "postgresql"}),
     )
 
 
