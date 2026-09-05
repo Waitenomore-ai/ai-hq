@@ -50,4 +50,7 @@ jobs:
             tests/test_host_helper_executor.py \
             tests/test_operational_adapters.py \
             tests/test_operational_bootstrap.py \
-            tests/test_operational_host_helper_transport.py
+            tests/test_operational_host_helper_transport.py \
+            tests/test_scoped_rule_consumption.py \
+            tests/test_tool_gateway.py \
+            tests/test_safety_service.py
