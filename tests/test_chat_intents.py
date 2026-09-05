@@ -152,3 +152,72 @@ def test_sysadmin_natural_ai_hq_logs_routes_to_logs_read():
     assert [step["tool_name"] for step in intent.steps] == [
         "service.logs.read"
     ]
+
+
+
+def test_sysadmin_v2_investigate_ai_hq_runs_complete_read_only_inspection():
+    intent = plan_sysadmin_intent(
+        "Is anything wrong with AI HQ?"
+    )
+
+    assert intent.kind == "operational"
+    assert [step["tool_name"] for step in intent.steps] == [
+        "system.health.read",
+        "service.status.read",
+        "service.logs.read",
+    ]
+
+    assert all(
+        step["tool_arguments"] == {"target": "ai-hq"}
+        for step in intent.steps
+    )
+
+
+def test_sysadmin_v2_check_everything_runs_complete_read_only_inspection():
+    intent = plan_sysadmin_intent(
+        "Check everything in AI HQ."
+    )
+
+    assert intent.kind == "operational"
+    assert [step["tool_name"] for step in intent.steps] == [
+        "system.health.read",
+        "service.status.read",
+        "service.logs.read",
+    ]
+
+
+def test_sysadmin_v2_is_ai_hq_okay_runs_complete_read_only_inspection():
+    intent = plan_sysadmin_intent(
+        "Is AI HQ okay?"
+    )
+
+    assert intent.kind == "operational"
+    assert [step["tool_name"] for step in intent.steps] == [
+        "system.health.read",
+        "service.status.read",
+        "service.logs.read",
+    ]
+
+
+def test_sysadmin_v2_investigate_ai_hq_phrase_runs_complete_inspection():
+    intent = plan_sysadmin_intent(
+        "Investigate AI HQ."
+    )
+
+    assert intent.kind == "operational"
+    assert [step["tool_name"] for step in intent.steps] == [
+        "system.health.read",
+        "service.status.read",
+        "service.logs.read",
+    ]
+
+
+def test_sysadmin_v2_investigation_never_expands_authority():
+    intent = plan_sysadmin_intent(
+        "Investigate AI HQ and restart anything broken."
+    )
+
+    assert intent.kind == "refused"
+    assert intent.steps == ()
+    assert intent.refusal_reason is not None
+    assert "read-only" in intent.refusal_reason.lower()

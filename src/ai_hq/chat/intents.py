@@ -124,6 +124,16 @@ def plan_sysadmin_intent(text: str) -> ChatIntent:
         _contains_any(
             normalized,
             (
+                "is anything wrong with ai hq",
+                "is anything wrong with ai-hq",
+                "check everything in ai hq",
+                "check everything in ai-hq",
+                "is ai hq okay",
+                "is ai-hq okay",
+                "is ai hq ok",
+                "is ai-hq ok",
+                "investigate ai hq",
+                "investigate ai-hq",
                 "how is my server",
                 "how's my server",
                 "how is the server",
