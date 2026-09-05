@@ -59,6 +59,9 @@ jobs:
             tests/test_recovery_service.py \
             tests/test_recovery_missions.py \
             tests/test_recovery_notifications.py \
+            tests/test_recovery_worker.py \
+            tests/test_autonomous_worker_operations.py \
+            tests/test_autonomous_missions.py \
             tests/test_notifications.py \
             tests/test_tool_gateway.py \
             tests/test_safety_service.py
