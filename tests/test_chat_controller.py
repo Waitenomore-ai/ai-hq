@@ -393,3 +393,57 @@ def test_sysadmin_final_output_normalization_and_current_state_guard():
     assert '"running" in current_status' in source
     assert "Historical log failures must not" in source
     assert "content = _normalize_sysadmin_output(content)" in source
+
+
+
+def test_sysadmin_rejects_provider_safety_metadata():
+    from ai_hq.chat.controller import _usable_sysadmin_model_reply
+
+    assert not _usable_sysadmin_model_reply("User Safety: safe")
+    assert not _usable_sysadmin_model_reply("User Safety: unsafe")
+    assert _usable_sysadmin_model_reply(
+        "AI HQ is healthy based on the persisted evidence."
+    )
+
+
+def test_sysadmin_deterministic_summary_prefers_current_status():
+    from ai_hq.chat.controller import _deterministic_sysadmin_summary
+
+    evidence = [
+        {
+            "position": 1,
+            "tool_name": "system.health.read",
+            "tool_arguments": {},
+            "status": "SUCCEEDED",
+            "result": {"load_1m": 0.5},
+            "error_state": None,
+        },
+        {
+            "position": 2,
+            "tool_name": "service.status.read",
+            "tool_arguments": {"service": "ai-hq"},
+            "status": "SUCCEEDED",
+            "result": {
+                "active_state": "active",
+                "sub_state": "running",
+            },
+            "error_state": None,
+        },
+        {
+            "position": 3,
+            "tool_name": "service.logs.read",
+            "tool_arguments": {"service": "ai-hq"},
+            "status": "SUCCEEDED",
+            "result": {
+                "logs": "old Permission denied failure"
+            },
+            "error_state": None,
+        },
+    ]
+
+    result = _deterministic_sysadmin_summary(evidence)
+
+    assert "AI HQ Status: Healthy" in result
+    assert "currently active and running" in result
+    assert "No active AI HQ problem was detected" in result
+    assert "Attention Required" not in result

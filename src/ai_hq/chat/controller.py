@@ -62,6 +62,101 @@ class ChatControllerResult:
     mission_id: str | None = None
 
 
+def _deterministic_sysadmin_summary(
+    evidence: list[dict[str, Any]],
+) -> str:
+    """Build a safe operational summary directly from persisted evidence."""
+    health = next(
+        (
+            item for item in evidence
+            if item["tool_name"] == "system.health.read"
+        ),
+        None,
+    )
+    status = next(
+        (
+            item for item in evidence
+            if item["tool_name"] == "service.status.read"
+        ),
+        None,
+    )
+
+    health_ok = (
+        health is not None
+        and health["status"] == "SUCCEEDED"
+    )
+    status_ok = (
+        status is not None
+        and status["status"] == "SUCCEEDED"
+    )
+
+    status_text = (
+        json.dumps(status["result"], sort_keys=True).lower()
+        if status_ok
+        else ""
+    )
+    service_running = (
+        "active" in status_text
+        and "running" in status_text
+    )
+
+    if health_ok and service_running:
+        return (
+            "## AI HQ Status: Healthy\n\n"
+            "The persisted read-only inspection shows AI HQ is healthy.\n\n"
+            "- System health check succeeded.\n"
+            "- `ai-hq-host-helper.service` is currently active and running.\n"
+            "- Historical log errors do not indicate a current failure "
+            "while the fresh service status remains active/running.\n\n"
+            "**Current assessment:** No active AI HQ problem was detected."
+        )
+
+    if health_ok and status_ok:
+        return (
+            "## AI HQ Status: Attention Required\n\n"
+            "The system health check succeeded, but the current service "
+            "evidence does not confirm that the AI HQ Host Helper is both "
+            "active and running.\n\n"
+            "**Current assessment:** Review the current service evidence."
+        )
+
+    if health_ok:
+        return (
+            "## AI HQ Status: Partially Verified\n\n"
+            "The system health check succeeded, but current service status "
+            "could not be fully verified from the persisted evidence."
+        )
+
+    return (
+        "## AI HQ Status: Unable to Verify\n\n"
+        "The persisted inspection does not contain enough successful "
+        "current evidence to determine AI HQ's health safely."
+    )
+
+
+def _usable_sysadmin_model_reply(content: str) -> bool:
+    """Reject obvious provider metadata instead of showing it as diagnosis."""
+    normalized = " ".join(content.strip().lower().split())
+
+    if not normalized:
+        return False
+
+    rejected = {
+        "user safety: safe",
+        "user safety: unsafe",
+        "safety: safe",
+        "safety: unsafe",
+    }
+
+    if normalized in rejected:
+        return False
+
+    if normalized.startswith("user safety:") and len(normalized) < 80:
+        return False
+
+    return True
+
+
 def _normalize_sysadmin_output(content: str) -> str:
     """Normalize harmless Markdown escapes emitted by chat providers."""
     for char in ("*", "`", "~", "_", "#"):
@@ -377,14 +472,14 @@ class ChatController:
                     model_messages,
                 )
                 content = _normalize_sysadmin_output(content)
+
+                if not _usable_sysadmin_model_reply(content):
+                    content = _deterministic_sysadmin_summary(evidence)
+
                 state = "complete"
             except ChatModelError:
-                content = (
-                    "The read-only inspection completed, but SysAdmin "
-                    "could not summarize the persisted evidence because "
-                    "the chat model is unavailable."
-                )
-                state = "unavailable"
+                content = _deterministic_sysadmin_summary(evidence)
+                state = "complete"
 
         message = self.chat_service.add_message(
             conversation_id=conversation_id,
