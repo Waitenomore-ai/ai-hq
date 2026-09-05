@@ -82,6 +82,17 @@ class ToolGateway:
                 result={"simulated": True},
             )
 
+        if request.mutates_external_state and safety.scoped_rule_id is not None:
+            try:
+                self.safety.approvals.consume_rule(safety.scoped_rule_id)
+            except (KeyError, ValueError):
+                self._record_result(request, state=ToolOutcomeState.BLOCKED)
+                return ToolOutcome(
+                    state=ToolOutcomeState.BLOCKED,
+                    capability=request.capability,
+                    reason="scoped_rule_consumption_failed",
+                )
+
         try:
             result = adapter.execute(request)
         except ToolAdapterError:
