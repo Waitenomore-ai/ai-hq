@@ -116,3 +116,39 @@ def test_all_generated_operational_plans_remain_allowlisted():
 
         if intent.kind == "operational":
             assert_safe_read_plan(intent)
+
+
+def test_sysadmin_natural_ai_hq_health_routes_to_health_read():
+    intent = plan_sysadmin_intent(
+        "What is the current health of AI HQ?"
+    )
+
+    assert intent.kind == "operational"
+    assert [step["tool_name"] for step in intent.steps] == [
+        "system.health.read"
+    ]
+    assert intent.steps[0]["tool_arguments"] == {
+        "target": "ai-hq"
+    }
+
+
+def test_sysadmin_natural_ai_hq_service_status_routes_to_status_read():
+    intent = plan_sysadmin_intent(
+        "What's the current status of AI HQ services?"
+    )
+
+    assert intent.kind == "operational"
+    assert [step["tool_name"] for step in intent.steps] == [
+        "service.status.read"
+    ]
+
+
+def test_sysadmin_natural_ai_hq_logs_routes_to_logs_read():
+    intent = plan_sysadmin_intent(
+        "Show me the recent AI HQ logs."
+    )
+
+    assert intent.kind == "operational"
+    assert [step["tool_name"] for step in intent.steps] == [
+        "service.logs.read"
+    ]

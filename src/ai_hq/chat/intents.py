@@ -82,6 +82,8 @@ def plan_sysadmin_intent(text: str) -> ChatIntent:
             "logs",
             "logging",
             "recent log",
+            "ai hq logs",
+            "ai-hq logs",
         ),
     )
 
@@ -95,6 +97,10 @@ def plan_sysadmin_intent(text: str) -> ChatIntent:
             "services up",
             "is the service",
             "status of the service",
+            "status of ai hq services",
+            "status of ai-hq services",
+            "ai hq services status",
+            "ai-hq services status",
         ),
     )
 
@@ -107,6 +113,10 @@ def plan_sysadmin_intent(text: str) -> ChatIntent:
             "check health",
             "machine health",
             "host health",
+            "health of ai hq",
+            "ai hq health",
+            "ai-hq health",
+            "health of ai-hq",
         ),
     )
 
