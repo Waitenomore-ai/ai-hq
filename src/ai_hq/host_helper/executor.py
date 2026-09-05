@@ -12,7 +12,7 @@ from ai_hq.host_helper.contracts import (
     HostCapability,
 )
 
-COMMAND_TIMEOUT_SECONDS = 3.0
+COMMAND_TIMEOUT_SECONDS = 8.0
 MAX_LOG_LINES = 200
 MAX_RESPONSE_BYTES = 64 * 1024
 

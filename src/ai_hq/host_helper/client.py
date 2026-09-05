@@ -15,7 +15,7 @@ class HostHelperClient:
         self,
         socket_path: str,
         credential: str,
-        timeout_seconds: float = 4.0,
+        timeout_seconds: float = 10.0,
     ):
         self.socket_path = socket_path
         self.credential = credential

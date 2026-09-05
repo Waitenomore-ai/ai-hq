@@ -197,3 +197,34 @@ def test_host_resources_reads_only_fixed_resource_set(allow_lists: HostAllowList
     ]
     assert response.data["memory"]["total_bytes"] == 1000
     assert response.data["filesystem"]["path"] == "/"
+
+
+def test_logs_recent_survives_journalctl_slower_than_three_seconds():
+    """journalctl on a busy/self-referential unit can legitimately take
+    slightly longer than 3s; the executor's command timeout must not be
+    so tight that normal production latency is treated as a failure."""
+    import subprocess
+    from ai_hq.host_helper.contracts import HelperRequest, HostAllowLists, HostCapability
+    from ai_hq.host_helper.executor import HostExecutor, CompletedCommand
+
+    def slow_runner(argv, timeout):
+        if timeout < 3.2:
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=timeout)
+        return CompletedCommand(0, "2026-09-05 log line\n", "")
+
+    allow_lists = HostAllowLists(
+        services=frozenset({"ai-hq"}),
+        containers=frozenset(),
+        logs=frozenset({"ai-hq"}),
+    )
+    executor = HostExecutor(allow_lists, command_runner=slow_runner)
+    request = HelperRequest(
+        capability=HostCapability.LOGS_RECENT,
+        target="ai-hq",
+        params={"lines": 100},
+    )
+
+    response = executor.execute(request)
+
+    assert response.ok is True
+    assert response.error is None
