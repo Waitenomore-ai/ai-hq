@@ -21,6 +21,15 @@ SERVICE_UNITS = {
     "nginx": "nginx.service",
     "dripvid": "dripvid.service",
 }
+DIAGNOSTIC_SERVICE_UNITS = {
+    "dripvid-mcp": "dripvid-mcp.service",
+    "cloudflared": "cloudflared.service",
+    "postgresql": "postgresql.service",
+}
+READ_SERVICE_UNITS = {
+    **SERVICE_UNITS,
+    **DIAGNOSTIC_SERVICE_UNITS,
+}
 RECOVERY_SERVICE_UNITS = {
     "app": "dripvid.service",
     "mcp": "dripvid-mcp.service",
@@ -45,6 +54,9 @@ LOG_TARGETS = {
     "ai-hq": ("journal", "ai-hq-host-helper.service"),
     "nginx": ("journal", "nginx.service"),
     "dripvid": ("journal", "dripvid.service"),
+    "dripvid-mcp": ("journal", "dripvid-mcp.service"),
+    "cloudflared": ("journal", "cloudflared.service"),
+    "postgresql": ("journal", "postgresql.service"),
 }
 
 _SECRET_ASSIGNMENT = re.compile(
@@ -228,14 +240,15 @@ class HostExecutor:
 
     def _service_status(self, request: HelperRequest) -> HelperResponse:
         target = request.target
-        if target not in self.allow_lists.services or target not in SERVICE_UNITS:
+        allowed = self.allow_lists.services | self.allow_lists.diagnostic_services
+        if target not in allowed or target not in READ_SERVICE_UNITS:
             return self._failure(request, "unknown target")
         result = self._command(
             request,
             [
                 "systemctl",
                 "show",
-                SERVICE_UNITS[target],
+                READ_SERVICE_UNITS[target],
                 "--no-page",
                 "--property=ActiveState,SubState,LoadState,UnitFileState",
             ],
@@ -461,7 +474,8 @@ class HostExecutor:
 
     def _logs_recent(self, request: HelperRequest) -> HelperResponse:
         target = request.target
-        if target not in self.allow_lists.logs or target not in LOG_TARGETS:
+        allowed = self.allow_lists.logs | self.allow_lists.diagnostic_logs
+        if target not in allowed or target not in LOG_TARGETS:
             return self._failure(request, "unknown target")
         lines = request.params.get("lines", 100)
         if (
