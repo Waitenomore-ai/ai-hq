@@ -10,6 +10,8 @@ class OperationalTarget:
     log_unit: str | None = None
     deploy_entrypoint: tuple[str, ...] | None = None
     rollback_entrypoint: tuple[str, ...] | None = None
+    host_helper_service_target: str | None = None
+    host_helper_log_target: str | None = None
 
     def __post_init__(self) -> None:
         if not self.key or not self.key.strip():
@@ -25,6 +27,18 @@ class OperationalTarget:
 
         if self.log_unit is not None and not self.log_unit.strip():
             raise ValueError("log unit cannot be empty")
+
+        if (
+            self.host_helper_service_target is not None
+            and not self.host_helper_service_target.strip()
+        ):
+            raise ValueError("host helper service target cannot be empty")
+
+        if (
+            self.host_helper_log_target is not None
+            and not self.host_helper_log_target.strip()
+        ):
+            raise ValueError("host helper log target cannot be empty")
 
         for entrypoint in (self.deploy_entrypoint, self.rollback_entrypoint):
             if entrypoint is not None:
