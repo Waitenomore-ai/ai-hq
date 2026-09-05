@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -28,6 +28,8 @@ class HostAllowLists:
     services: frozenset[str]
     containers: frozenset[str]
     logs: frozenset[str]
+    diagnostic_services: frozenset[str] = field(default_factory=frozenset)
+    diagnostic_logs: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +61,9 @@ def _validate_target(
             raise ValueError("unknown target")
         return target
 
-    if capability in {
-        HostCapability.SERVICE_STATUS,
+    if capability is HostCapability.SERVICE_STATUS:
+        allowed = allow_lists.services | allow_lists.diagnostic_services
+    elif capability in {
         HostCapability.SERVICE_RESTART,
         HostCapability.DEPLOYMENT_DEPLOY,
         HostCapability.DEPLOYMENT_ROLLBACK,
@@ -69,7 +72,7 @@ def _validate_target(
     elif capability is HostCapability.CONTAINER_STATUS:
         allowed = allow_lists.containers
     else:
-        allowed = allow_lists.logs
+        allowed = allow_lists.logs | allow_lists.diagnostic_logs
 
     if target not in allowed:
         raise ValueError("unknown target")
