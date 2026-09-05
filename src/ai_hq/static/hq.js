@@ -196,52 +196,91 @@
   }
 
   function renderMarkdown(target, content) {
-    content = content.replace(/\\([*`~_#])/g, "$1");
+    // Provider output is persisted as ordinary Markdown. Render only the
+    // small subset SysAdmin uses, entirely with DOM APIs: never innerHTML.
+    const normalized = String(content)
+      .replace(/\\([*`~_#])/g, "$1")
+      .replace(/\r\n?/g, "\n");
+
     const inline = (parent, text) => {
-      const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-      parts.filter(Boolean).forEach((part) => {
-        if (part.startsWith("`") && part.endsWith("`")) {
-          const code = document.createElement("code");
-          code.textContent = part.slice(1, -1);
-          parent.appendChild(code);
-        } else if (part.startsWith("**") && part.endsWith("**")) {
-          const strong = document.createElement("strong");
-          strong.textContent = part.slice(2, -2);
-          parent.appendChild(strong);
-        } else {
-          parent.appendChild(document.createTextNode(part));
+      const pattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g;
+      let cursor = 0;
+      let match;
+
+      while ((match = pattern.exec(text)) !== null) {
+        if (match.index > cursor) {
+          parent.appendChild(
+            document.createTextNode(text.slice(cursor, match.index))
+          );
         }
-      });
+
+        const token = match[0];
+
+        if (token.startsWith("`")) {
+          const code = document.createElement("code");
+          code.textContent = token.slice(1, -1);
+          parent.appendChild(code);
+        } else {
+          const strong = document.createElement("strong");
+          strong.textContent = token.slice(2, -2);
+          parent.appendChild(strong);
+        }
+
+        cursor = match.index + token.length;
+      }
+
+      if (cursor < text.length) {
+        parent.appendChild(
+          document.createTextNode(text.slice(cursor))
+        );
+      }
     };
 
     let list = null;
-    content.split(/\r?\n/).forEach((line) => {
+
+    normalized.split("\n").forEach((line) => {
       if (!line.trim()) {
         list = null;
         return;
       }
+
       const heading = line.match(/^(#{1,3})\s+(.+)$/);
-      const bullet = line.match(/^[-*]\s+(.+)$/);
-      let element;
+      const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+
       if (heading) {
         list = null;
-        element = document.createElement(`h${heading[1].length + 3}`);
+
+        // Chat messages live inside the page hierarchy, so Markdown
+        // h1/h2/h3 map to h4/h5/h6.
+        const element = document.createElement(
+          `h${Math.min(6, heading[1].length + 3)}`
+        );
+
+        element.className = "sysadmin-chat__markdown-heading";
         inline(element, heading[2]);
         target.appendChild(element);
-      } else if (bullet) {
+        return;
+      }
+
+      if (bullet) {
         if (!list) {
           list = document.createElement("ul");
+          list.className = "sysadmin-chat__markdown-list";
           target.appendChild(list);
         }
-        element = document.createElement("li");
-        inline(element, bullet[1]);
-        list.appendChild(element);
-      } else {
-        list = null;
-        element = document.createElement("p");
-        inline(element, line);
-        target.appendChild(element);
+
+        const item = document.createElement("li");
+        inline(item, bullet[1]);
+        list.appendChild(item);
+        return;
       }
+
+      list = null;
+
+      const paragraph = document.createElement("p");
+      paragraph.className = "sysadmin-chat__markdown-paragraph";
+      inline(paragraph, line);
+      target.appendChild(paragraph);
     });
   }
 

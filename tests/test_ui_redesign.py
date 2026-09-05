@@ -69,7 +69,30 @@ def test_sysadmin_chat_renders_markdown_without_innerhtml():
 
 def test_sysadmin_chat_normalizes_escaped_markdown():
     from pathlib import Path
+
     js = Path("src/ai_hq/static/hq.js").read_text()
-    assert "content = content.replace" in js
+
+    # The renderer must normalize provider-escaped Markdown before
+    # constructing safe DOM nodes. Do not couple this regression test
+    # to the local JavaScript variable name used by the implementation.
+    assert '.replace(/\\\\([*`~_#])/g, "$1")' in js
+    assert "renderMarkdown(body, content);" in js
     assert "renderMarkdown(body, content)" in js
     assert "body.innerHTML" not in js
+
+
+
+def test_sysadmin_markdown_renderer_preserves_structure():
+    from pathlib import Path
+
+    source = Path("src/ai_hq/static/hq.js").read_text()
+
+    assert "function renderMarkdown(target, content)" in source
+    assert 'document.createElement("strong")' in source
+    assert 'document.createElement("code")' in source
+    assert 'document.createElement("ul")' in source
+    assert 'document.createElement("li")' in source
+    assert "sysadmin-chat__markdown-heading" in source
+    assert "sysadmin-chat__markdown-paragraph" in source
+    assert "renderMarkdown(body, content);" in source
+    assert ".innerHTML" not in source

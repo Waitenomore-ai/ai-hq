@@ -411,3 +411,40 @@ button { color: inherit; }
     min-height: 48px;
   }
 }
+
+
+/* SysAdmin rendered Markdown */
+.sysadmin-chat__message-body {
+  white-space: normal;
+}
+
+.sysadmin-chat__message-body > :first-child {
+  margin-top: 0;
+}
+
+.sysadmin-chat__message-body > :last-child {
+  margin-bottom: 0;
+}
+
+.sysadmin-chat__markdown-paragraph {
+  margin: 0 0 0.7rem;
+  white-space: normal;
+}
+
+.sysadmin-chat__markdown-heading {
+  margin: 1rem 0 0.45rem;
+  line-height: 1.25;
+}
+
+.sysadmin-chat__markdown-list {
+  margin: 0.25rem 0 0.8rem;
+  padding-left: 1.35rem;
+}
+
+.sysadmin-chat__markdown-list li {
+  margin: 0.25rem 0;
+}
+
+.sysadmin-chat__message-body code {
+  white-space: normal;
+}
