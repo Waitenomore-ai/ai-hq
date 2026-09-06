@@ -100,6 +100,7 @@ def test_worker_repeatedly_runs_missions_and_sleeps_only_when_idle(monkeypatch):
     assert calls == 3
     assert sleeps == 1
 
+
 def test_freeze_mode_never_constructs_or_runs_department_runner(monkeypatch):
     monkeypatch.setattr(
         worker,
@@ -111,6 +112,19 @@ def test_freeze_mode_never_constructs_or_runs_department_runner(monkeypatch):
     def forbidden(_settings):
         raise AssertionError("frozen worker must not construct runner")
 
+    monkeypatch.setattr(worker, "build_department_runner", forbidden)
+
+    class StopProbe(RuntimeError):
+        pass
+
+    monkeypatch.setattr(
+        worker.time,
+        "sleep",
+        lambda _seconds: (_ for _ in ()).throw(StopProbe()),
+    )
+
+    with pytest.raises(StopProbe):
+        worker.run_worker()
 
 
 def isolated_session_factory():
@@ -127,12 +141,10 @@ def isolated_session_factory():
     )
     Base.metadata.create_all(engine)
 
-    return sessionmaker(
-        bind=engine,
-        expire_on_commit=False,
-    )
+    return sessionmaker(bind=engine, expire_on_commit=False)
 
-def test_production_autonomous_runner_wires_delivery_runtime():
+
+def test_production_autonomous_runner_fails_closed_without_workspace_backend():
     class FakeSettings:
         host_helper_credential = None
         host_helper_socket = "/tmp/test-host-helper.sock"
@@ -142,30 +154,13 @@ def test_production_autonomous_runner_wires_delivery_runtime():
         session_factory=isolated_session_factory(),
     )
 
-    assert runner.delivery_runtime is not None
-
-    from ai_hq.delivery.runtime import DeliveryRuntime
-
-    assert isinstance(
-        runner.delivery_runtime,
-        DeliveryRuntime,
-    )
+    assert runner.delivery_runner is None
 
 
-def test_production_delivery_runtime_uses_same_session_factory():
-    class FakeSettings:
-        host_helper_credential = None
-        host_helper_socket = "/tmp/test-host-helper.sock"
+def test_worker_bootstrap_does_not_wire_direct_delivery_runtime_bridge():
+    import inspect
 
-    factory = isolated_session_factory()
+    source = inspect.getsource(worker.build_autonomous_mission_runner)
 
-    runner = worker.build_autonomous_mission_runner(
-        FakeSettings(),
-        session_factory=factory,
-    )
-
-    assert runner.delivery_runtime is not None
-    assert (
-        runner.delivery_runtime.delivery_service.session_factory
-        is factory
-    )
+    assert "DeliveryRuntime" not in source
+    assert "handoff_to_developer" not in source
