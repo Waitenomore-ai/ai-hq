@@ -1,5 +1,6 @@
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,6 +27,8 @@ class Settings(BaseSettings):
     session_lifetime_hours: int = 12
     host_helper_socket: str = "/run/ai-hq/host-helper.sock"
     host_helper_credential: str | None = None
+    repository_sandbox_root: str | None = None
+    ai_hq_repository_source: str | None = None
 
     # Provider-independent SysAdmin chat model boundary.
     # The configured endpoint must expose an OpenAI-compatible
@@ -55,6 +58,29 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.casefold() == "production"
+
+    @property
+    def repository_sandbox_root_path(self) -> Path | None:
+        if self.repository_sandbox_root is None:
+            return None
+        return Path(self.repository_sandbox_root).expanduser().resolve()
+
+    @property
+    def ai_hq_repository_source_path(self) -> Path | None:
+        if self.ai_hq_repository_source is None:
+            return None
+        return Path(self.ai_hq_repository_source).expanduser().resolve()
+
+    @model_validator(mode="after")
+    def validate_repository_sandbox_paths(self) -> "Settings":
+        source = self.ai_hq_repository_source_path
+        sandbox = self.repository_sandbox_root_path
+        if source is None or sandbox is None:
+            return self
+
+        if source == sandbox or source in sandbox.parents or sandbox in source.parents:
+            raise ValueError("repository sandbox must not overlap the AI HQ repository source")
+        return self
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":

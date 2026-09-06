@@ -91,6 +91,8 @@ def test_hq_state_returns_stable_first_floor_rooms():
         "communications",
         "calendar",
         "sysadmin",
+        "developer",
+        "qa",
         "approvals",
         "knowledge",
     ]
