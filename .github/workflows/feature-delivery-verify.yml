@@ -41,4 +41,4 @@ jobs:
           tests/test_autonomous_worker.py
           tests/test_worker.py
       - name: Validate Compose
-        run: docker compose -f compose.yaml config >/dev/null
+        run: cp .env.example .env && docker compose -f compose.yaml config >/dev/null
