@@ -20,7 +20,9 @@ ProtectHome=true
 ProtectSystem=strict
 ReadWritePaths=/run/ai-hq
 PrivateDevices=false
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1
 LockPersonality=true
 MemoryDenyWriteExecute=true
 
