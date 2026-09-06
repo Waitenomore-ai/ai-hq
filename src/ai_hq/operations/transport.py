@@ -30,70 +30,39 @@ class HostHelperOperationalTransport:
             raise ToolAdapterError("host_helper_unavailable") from exc
 
         if not response.ok:
-            raise ToolAdapterError(
-                response.error or "host_helper_failed"
-            )
-
-        if (
-            response.capability is not request.capability
-            or response.target != request.target
-        ):
+            raise ToolAdapterError(response.error or "host_helper_failed")
+        if response.capability is not request.capability or response.target != request.target:
             raise ToolAdapterError("host_helper_response_mismatch")
-
         return response.data
 
-    def system_health(
-        self,
-        target: OperationalTarget,
-    ) -> dict[str, object]:
-        # Host health is intentionally host-scoped. The logical operational
-        # target has already been validated by the capability adapter.
+    def system_health(self, target: OperationalTarget) -> dict[str, object]:
         return self._execute(
-            HelperRequest(
-                capability=HostCapability.HOST_HEALTH,
-                target=None,
-                params={},
-            )
+            HelperRequest(capability=HostCapability.HOST_HEALTH, target=None, params={})
         )
 
-    def service_status(
-        self,
-        target: OperationalTarget,
-    ) -> dict[str, object]:
+    def service_status(self, target: OperationalTarget) -> dict[str, object]:
+        helper_target = target.host_helper_service_target or target.key
         return self._execute(
             HelperRequest(
                 capability=HostCapability.SERVICE_STATUS,
-                target=target.key,
+                target=helper_target,
                 params={},
             )
         )
 
-    def service_logs(
-        self,
-        target: OperationalTarget,
-        *,
-        lines: int,
-    ) -> dict[str, object]:
-        if (
-            isinstance(lines, bool)
-            or not isinstance(lines, int)
-            or lines < 1
-            or lines > HOST_HELPER_MAX_LOG_LINES
-        ):
+    def service_logs(self, target: OperationalTarget, *, lines: int) -> dict[str, object]:
+        if isinstance(lines, bool) or not isinstance(lines, int) or lines < 1 or lines > HOST_HELPER_MAX_LOG_LINES:
             raise ToolAdapterError("invalid_log_line_count")
-
+        helper_target = target.host_helper_log_target or target.key
         return self._execute(
             HelperRequest(
                 capability=HostCapability.LOGS_RECENT,
-                target=target.key,
+                target=helper_target,
                 params={"lines": lines},
             )
         )
 
-    def service_restart(
-        self,
-        target: OperationalTarget,
-    ) -> dict[str, object]:
+    def service_restart(self, target: OperationalTarget) -> dict[str, object]:
         return self._execute(
             HelperRequest(
                 capability=HostCapability.SERVICE_RESTART,
@@ -102,10 +71,16 @@ class HostHelperOperationalTransport:
             )
         )
 
-    def deployment_deploy(
-        self,
-        target: OperationalTarget,
-    ) -> dict[str, object]:
+    def service_recover(self, target: OperationalTarget, *, component: str) -> dict[str, object]:
+        return self._execute(
+            HelperRequest(
+                capability=HostCapability.SERVICE_RECOVER,
+                target=target.key,
+                params={"component": component},
+            )
+        )
+
+    def deployment_deploy(self, target: OperationalTarget) -> dict[str, object]:
         return self._execute(
             HelperRequest(
                 capability=HostCapability.DEPLOYMENT_DEPLOY,
@@ -114,23 +89,15 @@ class HostHelperOperationalTransport:
             )
         )
 
-    def deployment_rollback(
-        self,
-        target: OperationalTarget,
-        release_id: str,
-    ) -> dict[str, object]:
+    def deployment_rollback(self, target: OperationalTarget, release_id: str) -> dict[str, object]:
         if (
             not isinstance(release_id, str)
             or not release_id
             or len(release_id) > 128
             or not release_id.isascii()
-            or any(
-                not (char.isalnum() or char in "._-")
-                for char in release_id
-            )
+            or any(not (char.isalnum() or char in "._-") for char in release_id)
         ):
             raise ToolAdapterError("invalid_release_id")
-
         return self._execute(
             HelperRequest(
                 capability=HostCapability.DEPLOYMENT_ROLLBACK,
@@ -140,5 +107,4 @@ class HostHelperOperationalTransport:
         )
 
 
-# Compatibility name for code that imports the Stage 2 transport symbol.
 OperationalHostTransport = HostHelperOperationalTransport

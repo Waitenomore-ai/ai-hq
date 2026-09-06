@@ -1,6 +1,7 @@
 from typing import Protocol
 
 from ai_hq.operations.targets import OperationalTarget, OperationalTargetRegistry
+from ai_hq.recovery.policy import RECOVERY_COMPONENTS
 from ai_hq.tool_gateway.contracts import ToolAdapterError, ToolRequest
 
 DEFAULT_LOG_LINES = 100
@@ -28,6 +29,13 @@ class OperationalTransport(Protocol):
     def service_restart(
         self,
         target: OperationalTarget,
+    ) -> dict[str, object]: ...
+
+    def service_recover(
+        self,
+        target: OperationalTarget,
+        *,
+        component: str,
     ) -> dict[str, object]: ...
 
     def deployment_deploy(
@@ -125,6 +133,32 @@ class ServiceRestartAdapter(_OperationalAdapter):
         return self.transport.service_restart(target)
 
 
+class ServiceRecoverAdapter(_OperationalAdapter):
+    capability = "service.recover"
+
+    def execute(self, request: ToolRequest) -> dict[str, object]:
+        target = self._target(request)
+
+        if target.key != "dripvid":
+            raise ToolAdapterError("recovery_target_denied")
+
+        if set(request.params) != {"component"}:
+            raise ToolAdapterError("invalid_recovery_parameters")
+
+        component = request.params.get("component")
+        if not isinstance(component, str) or component not in RECOVERY_COMPONENTS:
+            raise ToolAdapterError("invalid_recovery_component")
+
+        if not request.mutates_external_state:
+            raise ToolAdapterError("recovery_requires_mutation_flag")
+
+        method = getattr(self.transport, "service_recover", None)
+        if method is None:
+            raise ToolAdapterError("recovery_transport_unavailable")
+
+        return method(target, component=component)
+
+
 class DeploymentDeployAdapter(_OperationalAdapter):
     capability = "deployment.deploy"
 
@@ -162,10 +196,7 @@ class DeploymentRollbackAdapter(_OperationalAdapter):
         if not release_id.isascii():
             raise ToolAdapterError("invalid_release_id")
 
-        if any(
-            not (char.isalnum() or char in "._-")
-            for char in release_id
-        ):
+        if any(not (char.isalnum() or char in "._-") for char in release_id):
             raise ToolAdapterError("invalid_release_id")
 
         if not request.mutates_external_state:
