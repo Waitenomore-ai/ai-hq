@@ -84,3 +84,12 @@ class HostHelperClient:
             data=data,
             error=error,
         )
+
+    def dripvid_readiness(self) -> HelperResponse:
+        return self.execute(
+            HelperRequest(
+                capability=HostCapability.DRIPVID_READINESS,
+                target=None,
+                params={},
+            )
+        )
