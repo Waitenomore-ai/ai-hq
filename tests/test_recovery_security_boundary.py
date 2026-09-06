@@ -1,11 +1,13 @@
 import ast
 from pathlib import Path
 
-from ai_hq.host_helper.executor import RECOVERY_SERVICE_UNITS
+from ai_hq.host_helper.contracts import HostAllowLists, validate_request
+from ai_hq.host_helper.executor import DRIPVID_READINESS_URL, RECOVERY_SERVICE_UNITS
 from ai_hq.host_helper.server import _default_allow_lists
 
 
 RECOVERY_PACKAGE = Path("src/ai_hq/recovery")
+RECOVERY_BOOTSTRAP = RECOVERY_PACKAGE / "bootstrap.py"
 WORKER = Path("src/ai_hq/worker.py")
 
 
@@ -79,3 +81,62 @@ def test_diagnostic_only_targets_are_not_generic_mutation_targets():
     )
     assert allow_lists.diagnostic_services.isdisjoint(allow_lists.services)
     assert allow_lists.diagnostic_logs.isdisjoint(allow_lists.services)
+
+
+def test_dripvid_readiness_endpoint_is_fixed_to_host_loopback():
+    assert DRIPVID_READINESS_URL == "http://127.0.0.1:3000/health/ready"
+
+
+def test_dripvid_readiness_contract_accepts_no_caller_controlled_network_input():
+    allow_lists = HostAllowLists(
+        services=frozenset({"dripvid"}),
+        containers=frozenset(),
+        logs=frozenset({"dripvid"}),
+    )
+
+    request = validate_request(
+        {"capability": "dripvid.readiness", "target": None, "params": {}},
+        allow_lists,
+    )
+    assert request.target is None
+    assert request.params == {}
+
+    for payload in (
+        {
+            "capability": "dripvid.readiness",
+            "target": "dripvid",
+            "params": {},
+        },
+        {
+            "capability": "dripvid.readiness",
+            "target": None,
+            "params": {"url": "http://172.23.0.1:3000/health/ready"},
+        },
+        {
+            "capability": "dripvid.readiness",
+            "target": None,
+            "params": {"host": "172.23.0.1"},
+        },
+        {
+            "capability": "dripvid.readiness",
+            "target": None,
+            "params": {"path": "/health/live"},
+        },
+    ):
+        try:
+            validate_request(payload, allow_lists)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("readiness capability accepted caller-controlled network input")
+
+
+def test_production_recovery_bootstrap_does_not_use_container_local_http_probe():
+    source = RECOVERY_BOOTSTRAP.read_text(encoding="utf-8")
+    imports = _imported_modules(RECOVERY_BOOTSTRAP)
+    calls = _called_names(RECOVERY_BOOTSTRAP)
+
+    assert "httpx" not in imports
+    assert "DripVidReadinessProbe" not in calls
+    assert "recovery_dripvid_ready_url" not in source
+    assert "HostHelperDripVidReadinessProbe" in calls
