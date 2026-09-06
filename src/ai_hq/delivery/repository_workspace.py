@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 _SHA256_PREFIX = "sha256:"
@@ -29,6 +30,29 @@ def _sha256_digest(value: str, *, field: str) -> str:
         raise ValueError(f"{field} must be a sha256 digest") from exc
 
     return value
+
+
+class FileOperation(StrEnum):
+    WRITE = "write"
+    DELETE = "delete"
+
+
+@dataclass(frozen=True)
+class FileChange:
+    path: str
+    operation: FileOperation
+    content: str | None = None
+
+    def __post_init__(self) -> None:
+        path = _required(self.path, field="path")
+        if not isinstance(self.operation, FileOperation):
+            raise TypeError("operation must be a FileOperation")
+        if self.operation is FileOperation.WRITE:
+            if not isinstance(self.content, str):
+                raise ValueError("write content is required")
+        elif self.content is not None:
+            raise ValueError("delete content must be empty")
+        object.__setattr__(self, "path", path)
 
 
 @dataclass(frozen=True)
@@ -160,6 +184,14 @@ class RepositoryWorkspaceService(Protocol):
     """Narrow repository workspace boundary; deliberately not a shell API."""
 
     def prepare(self, *, mission_id: str) -> RepositoryWorkspace:
+        ...
+
+    def apply_changes(
+        self,
+        *,
+        workspace: RepositoryWorkspace,
+        changes: tuple[FileChange, ...],
+    ) -> CandidateSnapshot:
         ...
 
     def snapshot(
