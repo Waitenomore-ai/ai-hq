@@ -85,12 +85,12 @@ web_id="$(docker ps -q --filter 'label=com.docker.compose.project=ai-hq' --filte
 [[ -n "$worker_id" ]] || fail "AI HQ worker container is not running"
 [[ -n "$web_id" ]] || fail "AI HQ web container is not running"
 
-worker_mounts="$(docker inspect --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}' "$worker_id")"
-web_mounts="$(docker inspect --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}' "$web_id")"
+worker_mounts="$(docker inspect --format '{{range .Mounts}}{{.Source}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$worker_id")"
+web_mounts="$(docker inspect --format '{{range .Mounts}}{{.Source}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$web_id")"
 
-grep -Fq '/run/ai-hq/host-helper.sock' <<<"$worker_mounts" || fail "worker does not have Host Helper socket mount"
-if grep -Fq '/run/ai-hq/host-helper.sock' <<<"$web_mounts"; then
-  fail "web container must not have Host Helper socket mount"
+grep -Fxq '/run/ai-hq|/run/ai-hq|false' <<<"$worker_mounts" || fail "worker does not have read-only Host Helper runtime mount"
+if grep -Fq '|/run/ai-hq|' <<<"$web_mounts"; then
+  fail "web container must not have Host Helper runtime mount"
 fi
 if grep -Fq '/var/run/docker.sock' <<<"$worker_mounts$web_mounts"; then
   fail "AI HQ containers must not have Docker socket access"
