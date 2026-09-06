@@ -6,7 +6,7 @@ from ai_hq.delivery.candidate_verifier import (
 )
 from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
-    TestEvidence,
+    TestEvidence as WorkspaceTestEvidence,
 )
 
 
@@ -30,8 +30,8 @@ def snapshot(*, diff_char="a", content_char="b", files=None):
     )
 
 
-def test_evidence(*, passed=True, exit_code=0):
-    return TestEvidence(
+def machine_test_evidence(*, passed=True, exit_code=0):
+    return WorkspaceTestEvidence(
         passed=passed,
         exit_code=exit_code,
         summary="42 passed" if passed else "1 failed",
@@ -44,7 +44,7 @@ def verify(*, mission_id="mission-1", candidate=None, snap=None, tests=None):
         mission_id=mission_id,
         proposal=candidate or proposal(),
         snapshot=snap or snapshot(),
-        test_evidence=tests or test_evidence(),
+        test_evidence=tests or machine_test_evidence(),
     )
 
 
@@ -135,7 +135,7 @@ def test_verifier_rejects_non_mapping_proposal():
             mission_id="mission-8",
             proposal="not-a-mapping",
             snapshot=snapshot(),
-            test_evidence=test_evidence(),
+            test_evidence=machine_test_evidence(),
         )
 
 
