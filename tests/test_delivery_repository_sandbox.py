@@ -1,4 +1,6 @@
+import inspect
 from pathlib import Path
+from subprocess import CompletedProcess, TimeoutExpired
 
 import pytest
 
@@ -10,7 +12,7 @@ from ai_hq.delivery.repository_sandbox import IsolatedRepositorySandbox
 from ai_hq.delivery.repository_workspace import FileChange, FileOperation
 
 
-def build_sandbox(tmp_path):
+def build_sandbox(tmp_path, *, command_runner=None):
     source = tmp_path / "source"
     source.mkdir()
     (source / "src").mkdir()
@@ -21,10 +23,14 @@ def build_sandbox(tmp_path):
     registry = RepositoryProfileRegistry(
         (build_ai_hq_repository_profile(source_path=source),)
     )
+    kwargs = {}
+    if command_runner is not None:
+        kwargs["command_runner"] = command_runner
     sandbox = IsolatedRepositorySandbox(
         profile_registry=registry,
         repository_key="ai-hq",
         sandbox_root=sandbox_root,
+        **kwargs,
     )
     return sandbox, source, sandbox_root
 
@@ -222,3 +228,78 @@ def test_run_tests_rejects_workspace_changed_after_snapshot(tmp_path):
 
     with pytest.raises(RuntimeError, match="stale"):
         sandbox.run_tests(workspace=workspace)
+
+
+def test_run_tests_uses_only_fixed_profile_commands(tmp_path):
+    calls = []
+
+    def runner(argv, *, cwd, timeout_seconds):
+        calls.append((tuple(argv), cwd, timeout_seconds))
+        return CompletedProcess(argv, 0, stdout="passed\n", stderr="")
+
+    sandbox, _, sandbox_root = build_sandbox(tmp_path, command_runner=runner)
+    workspace = sandbox.prepare(mission_id="mission-1")
+    sandbox.snapshot(workspace=workspace)
+
+    evidence = sandbox.run_tests(workspace=workspace)
+
+    assert evidence.passed is True
+    assert evidence.exit_code == 0
+    assert len(calls) == 2
+    assert calls[0][0][1:4] == ("-m", "ruff", "check")
+    assert calls[1][0][1:3] == ("-m", "pytest")
+    assert all(call[1] == only_workspace_path(sandbox_root) for call in calls)
+
+
+def test_run_tests_stops_on_first_fixed_command_failure(tmp_path):
+    calls = []
+
+    def runner(argv, *, cwd, timeout_seconds):
+        calls.append(tuple(argv))
+        return CompletedProcess(argv, 1, stdout="", stderr="lint failed\n")
+
+    sandbox, _, _ = build_sandbox(tmp_path, command_runner=runner)
+    workspace = sandbox.prepare(mission_id="mission-1")
+    sandbox.snapshot(workspace=workspace)
+
+    evidence = sandbox.run_tests(workspace=workspace)
+
+    assert evidence.passed is False
+    assert evidence.exit_code == 1
+    assert len(calls) == 1
+    assert "lint failed" in evidence.summary
+
+
+def test_run_tests_bounds_machine_evidence_summary(tmp_path):
+    def runner(argv, *, cwd, timeout_seconds):
+        return CompletedProcess(argv, 0, stdout="x" * 10000, stderr="")
+
+    sandbox, _, _ = build_sandbox(tmp_path, command_runner=runner)
+    workspace = sandbox.prepare(mission_id="mission-1")
+    sandbox.snapshot(workspace=workspace)
+
+    evidence = sandbox.run_tests(workspace=workspace)
+
+    assert evidence.passed is True
+    assert 0 < len(evidence.summary) <= 4000
+    assert evidence.evidence_digest.startswith("sha256:")
+
+
+def test_run_tests_timeout_fails_closed(tmp_path):
+    def runner(argv, *, cwd, timeout_seconds):
+        raise TimeoutExpired(argv, timeout_seconds)
+
+    sandbox, _, _ = build_sandbox(tmp_path, command_runner=runner)
+    workspace = sandbox.prepare(mission_id="mission-1")
+    sandbox.snapshot(workspace=workspace)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        sandbox.run_tests(workspace=workspace)
+
+
+def test_run_tests_public_api_accepts_no_command_input(tmp_path):
+    sandbox, _, _ = build_sandbox(tmp_path)
+
+    signature = inspect.signature(sandbox.run_tests)
+
+    assert set(signature.parameters) == {"workspace"}
