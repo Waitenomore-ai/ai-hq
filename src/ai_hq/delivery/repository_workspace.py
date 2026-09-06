@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-
 _SHA256_PREFIX = "sha256:"
 _SHA256_HEX_LENGTH = 64
 _MAX_TEST_SUMMARY_LENGTH = 4000
@@ -93,7 +92,7 @@ class CandidateSnapshot:
         )
 
         if not isinstance(self.changed_files, tuple):
-            raise ValueError("changed_files must be a tuple")
+            raise TypeError("changed_files must be a tuple")
 
         normalized_files: list[str] = []
         for path in self.changed_files:
@@ -138,9 +137,9 @@ class TestEvidence:
 
     def __post_init__(self) -> None:
         if not isinstance(self.passed, bool):
-            raise ValueError("passed must be a boolean")
+            raise TypeError("passed must be a boolean")
         if not isinstance(self.exit_code, int) or isinstance(self.exit_code, bool):
-            raise ValueError("exit_code must be an integer")
+            raise TypeError("exit_code must be an integer")
 
         summary = _required(self.summary, field="summary")
         if len(summary) > _MAX_TEST_SUMMARY_LENGTH:
