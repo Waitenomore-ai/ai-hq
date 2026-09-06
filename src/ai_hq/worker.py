@@ -24,12 +24,14 @@ from ai_hq.missions.service import MissionService
 from ai_hq.missions.worker import AutonomousMissionRunner
 from ai_hq.operations.adapters import (
     ServiceLogsAdapter,
+    ServiceRecoverAdapter,
     ServiceStatusAdapter,
     SystemHealthAdapter,
 )
 from ai_hq.operations.targets import OperationalTarget, OperationalTargetRegistry
 from ai_hq.operations.transport import HostHelperOperationalTransport
 from ai_hq.queue import redis_ping
+from ai_hq.recovery.bootstrap import RecoveryWorkerCoordinator, build_recovery_coordinator
 from ai_hq.safety.service import SafetyService
 from ai_hq.system_state import ensure_system_state
 from ai_hq.tool_gateway.registry import ToolRegistry
@@ -114,17 +116,11 @@ def build_autonomous_mission_runner(
     *,
     session_factory=None,
 ) -> AutonomousMissionRunner:
-    """
-    Build the autonomous mission execution path.
+    """Build the guarded autonomous mission execution path.
 
-    Autonomous operational execution remains:
-
-        AutonomousMissionRunner -> MissionExecutor -> ToolGateway
-
-    Verified repository delivery is composed separately through the isolated
-    repository sandbox. It is enabled only when trusted repository paths and a
-    model client are configured. The worker never falls back to a direct
-    unverified candidate-metadata handoff.
+    Operational mutations remain MissionExecutor -> ToolGateway. Recovery adds
+    only the bounded ``service.recover`` capability; verified repository
+    delivery remains separately confined to the isolated repository sandbox.
     """
     if session_factory is None:
         session_factory = get_session_factory()
@@ -134,7 +130,6 @@ def build_autonomous_mission_runner(
     ledger = OperationsLedger(session_factory)
     missions = MissionService(session_factory, ledger)
     safety = SafetyService(session_factory, ledger=ledger)
-
     registry = ToolRegistry([])
 
     if settings.host_helper_credential:
@@ -143,7 +138,6 @@ def build_autonomous_mission_runner(
             settings.host_helper_credential,
         )
         transport = HostHelperOperationalTransport(helper)
-
         targets = OperationalTargetRegistry(
             [
                 OperationalTarget(
@@ -157,15 +151,21 @@ def build_autonomous_mission_runner(
                             "service.logs.read",
                         }
                     ),
-                )
+                ),
+                OperationalTarget(
+                    key="dripvid",
+                    service_unit="dripvid.service",
+                    log_unit="dripvid.service",
+                    allowed_capabilities=frozenset({"service.recover"}),
+                ),
             ]
         )
-
         registry = ToolRegistry(
             [
                 SystemHealthAdapter(targets=targets, transport=transport),
                 ServiceStatusAdapter(targets=targets, transport=transport),
                 ServiceLogsAdapter(targets=targets, transport=transport),
+                ServiceRecoverAdapter(targets=targets, transport=transport),
             ]
         )
 
@@ -175,7 +175,6 @@ def build_autonomous_mission_runner(
         safety=safety,
         ledger=ledger,
     )
-
     executor = MissionExecutor(missions, gateway)
     delivery_runner = _build_verified_delivery_runner(
         settings,
@@ -193,12 +192,29 @@ def run_worker_iteration(
     *,
     autonomous_runner: AutonomousMissionRunner,
     department_runner: DepartmentRunner,
+    recovery_coordinator: RecoveryWorkerCoordinator | None = None,
+    settings: Settings | None = None,
 ) -> bool:
-    """Execute at most one unit of worker activity."""
-    if autonomous_runner.run_once() is not None:
+    """Execute at most one unit of worker activity.
+
+    Recovery observation may persist a mission, but autonomous mission
+    execution remains the first executable path. Any recovery mutation still
+    happens later through MissionExecutor -> ToolGateway.
+    """
+    recovery_worked = False
+    if recovery_coordinator is not None and settings is not None:
+        recovery_worked = recovery_coordinator.run_if_due(settings)
+
+    autonomous_result = autonomous_runner.run_once()
+    if autonomous_result is not None:
+        if recovery_coordinator is not None:
+            recovery_coordinator.handle_execution_result(autonomous_result)
         return True
 
-    return bool(department_runner.run_once())
+    if department_runner.run_once():
+        return True
+
+    return recovery_worked
 
 
 def run_worker() -> int:
@@ -209,6 +225,8 @@ def run_worker() -> int:
 
     autonomous_runner = None
     department_runner = None
+    recovery_coordinator = None
+    recovery_initialized = False
 
     while True:
         settings = get_settings()
@@ -223,9 +241,15 @@ def run_worker() -> int:
         if department_runner is None:
             department_runner = build_department_runner(settings)
 
+        if not recovery_initialized:
+            recovery_coordinator = build_recovery_coordinator(settings)
+            recovery_initialized = True
+
         worked = run_worker_iteration(
             autonomous_runner=autonomous_runner,
             department_runner=department_runner,
+            recovery_coordinator=recovery_coordinator,
+            settings=settings,
         )
 
         if not worked:
