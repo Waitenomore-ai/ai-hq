@@ -26,6 +26,7 @@ class _WorkspaceState:
     path: Path
     profile: RepositoryProfile
     base_manifest: dict[str, str]
+    snapshot_fingerprint: str | None = None
 
 
 class IsolatedRepositorySandbox:
@@ -117,13 +118,15 @@ class IsolatedRepositorySandbox:
             }
             for path in changed_files
         ]
+        content_digest = self._canonical_digest(candidate_manifest)
+        state.snapshot_fingerprint = content_digest
         return CandidateSnapshot(
             workspace_id=workspace.workspace_id,
             repository=workspace.repository,
             base_ref=workspace.base_ref,
             changed_files=changed_files,
             diff_digest=self._canonical_digest(diff_material),
-            content_digest=self._canonical_digest(candidate_manifest),
+            content_digest=content_digest,
         )
 
     def run_tests(
@@ -131,7 +134,12 @@ class IsolatedRepositorySandbox:
         *,
         workspace: RepositoryWorkspace,
     ) -> TestEvidence:
-        self._state_for(workspace)
+        state = self._state_for(workspace)
+        if state.snapshot_fingerprint is None:
+            raise RuntimeError("repository workspace snapshot is required before tests")
+        current_fingerprint = self._canonical_digest(self._manifest(state.path))
+        if current_fingerprint != state.snapshot_fingerprint:
+            raise RuntimeError("repository workspace snapshot is stale")
         raise NotImplementedError("trusted repository test execution is not implemented yet")
 
     def _validate_root_isolation(self) -> None:
