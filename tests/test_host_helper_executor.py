@@ -199,6 +199,109 @@ def test_host_resources_reads_only_fixed_resource_set(allow_lists: HostAllowList
     assert response.data["filesystem"]["path"] == "/"
 
 
+def test_dripvid_readiness_uses_only_fixed_host_probe_and_bounds_output(
+    allow_lists: HostAllowLists,
+):
+    calls = []
+
+    def readiness_runner(url, timeout, limit):
+        calls.append((url, timeout, limit))
+        return {
+            "reachable": True,
+            "status_code": 200,
+            "ok": True,
+            "database": True,
+            "jellyfin": True,
+            "radarr": True,
+            "sonarr": True,
+            "qbittorrent": True,
+            "requestSync": True,
+            "storage": {
+                "available": True,
+                "writable": True,
+                "belowReserve": False,
+                "freeBytes": 959790956544,
+                "reserveBytes": 53687091200,
+                "root": "/mnt/TV",
+            },
+            "apiKey": "secret",
+            "root": "/mnt/TV",
+            "error": None,
+        }
+
+    executor = HostExecutor(allow_lists, readiness_runner=readiness_runner)
+    response = executor.execute(
+        HelperRequest(HostCapability.DRIPVID_READINESS, None, {})
+    )
+
+    assert calls == [("http://127.0.0.1:3000/health/ready", 3.0, 64 * 1024)]
+    assert response.ok is True
+    assert response.target is None
+    assert response.data == {
+        "reachable": True,
+        "status_code": 200,
+        "ok": True,
+        "database": True,
+        "jellyfin": True,
+        "radarr": True,
+        "sonarr": True,
+        "qbittorrent": True,
+        "requestSync": True,
+        "storage": {
+            "available": True,
+            "writable": True,
+            "belowReserve": False,
+            "freeBytes": 959790956544,
+            "reserveBytes": 53687091200,
+        },
+        "error": None,
+    }
+
+
+def test_dripvid_readiness_timeout_fails_closed(allow_lists: HostAllowLists):
+    def readiness_runner(url, timeout, limit):
+        raise TimeoutError
+
+    executor = HostExecutor(allow_lists, readiness_runner=readiness_runner)
+    response = executor.execute(
+        HelperRequest(HostCapability.DRIPVID_READINESS, None, {})
+    )
+
+    assert response.ok is True
+    assert response.data == {
+        "reachable": False,
+        "status_code": None,
+        "ok": False,
+        "error": "timeout",
+    }
+
+
+def test_dripvid_readiness_preserves_only_bounded_parse_error(
+    allow_lists: HostAllowLists,
+):
+    def readiness_runner(url, timeout, limit):
+        return {
+            "reachable": True,
+            "status_code": 200,
+            "ok": False,
+            "error": "invalid_json",
+            "body": "secret raw response",
+        }
+
+    executor = HostExecutor(allow_lists, readiness_runner=readiness_runner)
+    response = executor.execute(
+        HelperRequest(HostCapability.DRIPVID_READINESS, None, {})
+    )
+
+    assert response.ok is True
+    assert response.data == {
+        "reachable": True,
+        "status_code": 200,
+        "ok": False,
+        "error": "invalid_json",
+    }
+
+
 def test_logs_recent_survives_journalctl_slower_than_three_seconds():
     """journalctl on a busy/self-referential unit can legitimately take
     slightly longer than 3s; the executor's command timeout must not be
