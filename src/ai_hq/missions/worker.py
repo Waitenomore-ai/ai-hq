@@ -1,22 +1,33 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from ai_hq.missions.executor import MissionExecutionResult, MissionExecutor
 from ai_hq.missions.models import MissionStatus
 from ai_hq.missions.service import MissionService
 
 if TYPE_CHECKING:
-    from ai_hq.delivery.runtime import DeliveryRuntime
+    from typing import Any
+
+
+class VerifiedDeliveryRunner(Protocol):
+    def persist_candidate(
+        self,
+        *,
+        mission_id: str,
+        candidate: dict[str, Any],
+    ) -> bool:
+        ...
 
 
 class AutonomousMissionRunner:
     """
     Advances persisted autonomous mission plans through MissionExecutor.
 
-    This runner never executes tools, host helpers, subprocesses, or
-    infrastructure directly. MissionExecutor -> ToolGateway remains the
-    only execution path.
+    This runner never persists Developer candidates directly. When an
+    execution result carries candidate metadata, it is delegated to the
+    verified delivery runner so machine workspace evidence establishes the
+    trusted candidate identity before persistence.
     """
 
     def __init__(
@@ -24,11 +35,11 @@ class AutonomousMissionRunner:
         *,
         missions: MissionService,
         executor: MissionExecutor,
-        delivery_runtime: DeliveryRuntime | None = None,
+        delivery_runner: VerifiedDeliveryRunner | None = None,
     ) -> None:
         self.missions = missions
         self.executor = executor
-        self.delivery_runtime = delivery_runtime
+        self.delivery_runner = delivery_runner
 
     def run_once(self) -> MissionExecutionResult | None:
         for mission in self.missions.list_missions():
@@ -42,12 +53,7 @@ class AutonomousMissionRunner:
                 continue
 
             result = self.executor.run_next(mission.id)
-
-            self._handoff_delivery_candidate(
-                mission.id,
-                result,
-            )
-
+            self._handoff_delivery_candidate(mission.id, result)
             return result
 
         return None
@@ -57,60 +63,19 @@ class AutonomousMissionRunner:
         mission_id: str,
         result: MissionExecutionResult,
     ) -> None:
-        if self.delivery_runtime is None:
+        if self.delivery_runner is None:
             return
 
-        candidate = getattr(
-            result,
-            "delivery_candidate",
-            None,
-        )
-
+        candidate = getattr(result, "delivery_candidate", None)
         if candidate is None:
             return
 
         if not isinstance(candidate, dict):
-            raise ValueError(
-                "delivery candidate must be a mapping"
-            )
+            raise ValueError("delivery candidate must be a mapping")
 
-        change_ref = candidate.get("change_ref")
-
-        if not isinstance(change_ref, str) or not change_ref.strip():
-            raise ValueError(
-                "delivery candidate requires immutable change_ref"
-            )
-
-        summary = candidate.get("summary")
-
-        if not isinstance(summary, str) or not summary.strip():
-            raise ValueError(
-                "delivery candidate requires summary"
-            )
-
-        evidence = candidate.get("evidence")
-
-        if not isinstance(evidence, dict) or not evidence:
-            raise ValueError(
-                "delivery candidate requires developer evidence"
-            )
-
-        changed_files = candidate.get(
-            "changed_files",
-            [],
-        )
-
-        if not isinstance(changed_files, list):
-            raise ValueError(
-                "delivery candidate changed_files must be a list"
-            )
-
-        self.delivery_runtime.handoff_to_developer(
+        self.delivery_runner.persist_candidate(
             mission_id=mission_id,
-            change_ref=change_ref,
-            summary=summary,
-            changed_files=changed_files,
-            evidence=evidence,
+            candidate=dict(candidate),
         )
 
     def resume_approved(
