@@ -21,6 +21,22 @@ SERVICE_UNITS = {
     "nginx": "nginx.service",
     "dripvid": "dripvid.service",
 }
+DIAGNOSTIC_SERVICE_UNITS = {
+    "dripvid-mcp": "dripvid-mcp.service",
+    "cloudflared": "cloudflared.service",
+    "postgresql": "postgresql.service",
+}
+READ_SERVICE_UNITS = {
+    **SERVICE_UNITS,
+    **DIAGNOSTIC_SERVICE_UNITS,
+}
+RECOVERY_SERVICE_UNITS = {
+    "app": "dripvid.service",
+    "mcp": "dripvid-mcp.service",
+    "proxy": "nginx.service",
+    "tunnel": "cloudflared.service",
+    "database": "postgresql.service",
+}
 CONTAINER_TARGETS = {
     "ai-hq-web": "ai-hq-web-1",
     "ai-hq-worker": "ai-hq-worker-1",
@@ -38,6 +54,9 @@ LOG_TARGETS = {
     "ai-hq": ("journal", "ai-hq-host-helper.service"),
     "nginx": ("journal", "nginx.service"),
     "dripvid": ("journal", "dripvid.service"),
+    "dripvid-mcp": ("journal", "dripvid-mcp.service"),
+    "cloudflared": ("journal", "cloudflared.service"),
+    "postgresql": ("journal", "postgresql.service"),
 }
 
 _SECRET_ASSIGNMENT = re.compile(
@@ -102,7 +121,11 @@ class HostExecutor:
     def _failure(request: HelperRequest, error: str) -> HelperResponse:
         return HelperResponse(False, request.capability, request.target, {}, error)
 
-    def _command(self, request: HelperRequest, argv: list[str]) -> CompletedCommand | HelperResponse:
+    def _command(
+        self,
+        request: HelperRequest,
+        argv: list[str],
+    ) -> CompletedCommand | HelperResponse:
         try:
             result = self.command_runner(argv, COMMAND_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
@@ -123,6 +146,8 @@ class HostExecutor:
             return self._service_status(request)
         if capability is HostCapability.SERVICE_RESTART:
             return self._service_restart(request)
+        if capability is HostCapability.SERVICE_RECOVER:
+            return self._service_recover(request)
         if capability is HostCapability.DEPLOYMENT_DEPLOY:
             return self._deployment_deploy(request)
         if capability is HostCapability.DEPLOYMENT_ROLLBACK:
@@ -167,11 +192,23 @@ class HostExecutor:
 
         load_values = load.stdout.strip().split()
         memory_line = next(
-            (line for line in memory.stdout.splitlines() if line.strip().startswith("Mem:")),
+            (
+                line
+                for line in memory.stdout.splitlines()
+                if line.strip().startswith("Mem:")
+            ),
             "",
         ).split()
-        filesystem_lines = [line.split() for line in filesystem.stdout.splitlines() if line.strip()]
-        filesystem_values = filesystem_lines[-1] if len(filesystem_lines) >= 2 else []
+        filesystem_lines = [
+            line.split()
+            for line in filesystem.stdout.splitlines()
+            if line.strip()
+        ]
+        filesystem_values = (
+            filesystem_lines[-1]
+            if len(filesystem_lines) >= 2
+            else []
+        )
 
         if len(memory_line) < 4 or len(filesystem_values) < 6:
             return self._failure(request, "malformed_response")
@@ -203,14 +240,15 @@ class HostExecutor:
 
     def _service_status(self, request: HelperRequest) -> HelperResponse:
         target = request.target
-        if target not in self.allow_lists.services or target not in SERVICE_UNITS:
+        allowed = self.allow_lists.services | self.allow_lists.diagnostic_services
+        if target not in allowed or target not in READ_SERVICE_UNITS:
             return self._failure(request, "unknown target")
         result = self._command(
             request,
             [
                 "systemctl",
                 "show",
-                SERVICE_UNITS[target],
+                READ_SERVICE_UNITS[target],
                 "--no-page",
                 "--property=ActiveState,SubState,LoadState,UnitFileState",
             ],
@@ -261,6 +299,57 @@ class HostExecutor:
             request.capability,
             target,
             {
+                "restarted": True,
+                "active_state": values.get("ActiveState"),
+                "sub_state": values.get("SubState"),
+                "load_state": values.get("LoadState"),
+                "unit_file_state": values.get("UnitFileState"),
+            },
+        )
+
+    def _service_recover(self, request: HelperRequest) -> HelperResponse:
+        target = request.target
+        if target != "dripvid" or target not in self.allow_lists.services:
+            return self._failure(request, "unknown target")
+
+        if set(request.params) != {"component"}:
+            return self._failure(request, "invalid parameters")
+
+        component = request.params.get("component")
+        if (
+            not isinstance(component, str)
+            or component not in RECOVERY_SERVICE_UNITS
+        ):
+            return self._failure(request, "invalid parameters")
+
+        unit = RECOVERY_SERVICE_UNITS[component]
+        restarted = self._command(
+            request,
+            ["systemctl", "restart", unit],
+        )
+        if isinstance(restarted, HelperResponse):
+            return restarted
+
+        status = self._command(
+            request,
+            [
+                "systemctl",
+                "show",
+                unit,
+                "--no-page",
+                "--property=ActiveState,SubState,LoadState,UnitFileState",
+            ],
+        )
+        if isinstance(status, HelperResponse):
+            return status
+
+        values = _key_values(status.stdout)
+        return HelperResponse(
+            True,
+            request.capability,
+            target,
+            {
+                "component": component,
                 "restarted": True,
                 "active_state": values.get("ActiveState"),
                 "sub_state": values.get("SubState"),
@@ -351,11 +440,20 @@ class HostExecutor:
 
     def _container_status(self, request: HelperRequest) -> HelperResponse:
         target = request.target
-        if target not in self.allow_lists.containers or target not in CONTAINER_TARGETS:
+        if (
+            target not in self.allow_lists.containers
+            or target not in CONTAINER_TARGETS
+        ):
             return self._failure(request, "unknown target")
         result = self._command(
             request,
-            ["docker", "inspect", CONTAINER_TARGETS[target], "--format", "{{json .State}}"],
+            [
+                "docker",
+                "inspect",
+                CONTAINER_TARGETS[target],
+                "--format",
+                "{{json .State}}",
+            ],
         )
         if isinstance(result, HelperResponse):
             return result
@@ -368,22 +466,39 @@ class HostExecutor:
             True,
             request.capability,
             target,
-            {"status": state.get("Status"), "health": health.get("Status")},
+            {
+                "status": state.get("Status"),
+                "health": health.get("Status"),
+            },
         )
 
     def _logs_recent(self, request: HelperRequest) -> HelperResponse:
         target = request.target
-        if target not in self.allow_lists.logs or target not in LOG_TARGETS:
+        allowed = self.allow_lists.logs | self.allow_lists.diagnostic_logs
+        if target not in allowed or target not in LOG_TARGETS:
             return self._failure(request, "unknown target")
         lines = request.params.get("lines", 100)
-        if isinstance(lines, bool) or not isinstance(lines, int) or not 1 <= lines <= MAX_LOG_LINES:
+        if (
+            isinstance(lines, bool)
+            or not isinstance(lines, int)
+            or not 1 <= lines <= MAX_LOG_LINES
+        ):
             return self._failure(request, "invalid parameters")
         source, unit = LOG_TARGETS[target]
         if source != "journal":
             return self._failure(request, "unknown target")
         result = self._command(
             request,
-            ["journalctl", "-u", unit, "-n", str(lines), "--no-pager", "-o", "short-iso"],
+            [
+                "journalctl",
+                "-u",
+                unit,
+                "-n",
+                str(lines),
+                "--no-pager",
+                "-o",
+                "short-iso",
+            ],
         )
         if isinstance(result, HelperResponse):
             return result
@@ -393,5 +508,9 @@ class HostExecutor:
             True,
             request.capability,
             target,
-            {"text": text, "lines_requested": lines, "truncated": truncated},
+            {
+                "text": text,
+                "lines_requested": lines,
+                "truncated": truncated,
+            },
         )
