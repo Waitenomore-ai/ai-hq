@@ -4,8 +4,8 @@ from ai_hq.delivery.candidate_verifier import (
     CandidateVerifier,
     VerifiedCandidate,
 )
+from ai_hq.delivery.repository_workspace import CandidateSnapshot
 from ai_hq.delivery.repository_workspace import (
-    CandidateSnapshot,
     TestEvidence as WorkspaceTestEvidence,
 )
 
@@ -130,7 +130,7 @@ def test_verifier_rejects_missing_summary():
 
 
 def test_verifier_rejects_non_mapping_proposal():
-    with pytest.raises(ValueError, match="proposal"):
+    with pytest.raises(TypeError, match="proposal"):
         CandidateVerifier().verify(
             mission_id="mission-8",
             proposal="not-a-mapping",
