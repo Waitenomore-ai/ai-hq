@@ -1,11 +1,5 @@
 from pathlib import Path
 
-import pytest
-
-from ai_hq.delivery.models import DeliveryStage
-from ai_hq.delivery.service import DeliveryService
-from ai_hq.missions.models import MissionStatus
-
 
 def _existing_runtime_test_module():
     """
@@ -73,9 +67,9 @@ def test_runtime_handoff_requires_developer_evidence():
     Developer evidence must cross the runtime boundary explicitly so QA
     never approves an un-evidenced candidate.
     """
-    from ai_hq.delivery.runtime import DeliveryRuntime
-
     import inspect
+
+    from ai_hq.delivery.runtime import DeliveryRuntime
 
     signature = inspect.signature(
         DeliveryRuntime.handoff_to_developer
