@@ -1,8 +1,19 @@
 import time
 
 from ai_hq.agents.registry import AgentRegistry
+from ai_hq.chat.model_client import build_chat_model_client
 from ai_hq.config import OperatingMode, Settings, get_settings
 from ai_hq.db import get_session_factory
+from ai_hq.delivery.agent_runner import DeliveryAgentRunner
+from ai_hq.delivery.candidate_verifier import CandidateVerifier
+from ai_hq.delivery.model_agents import ModelBackedDeveloperAgent, ModelBackedQAAgent
+from ai_hq.delivery.repository_profiles import (
+    RepositoryProfileRegistry,
+    build_ai_hq_repository_profile,
+)
+from ai_hq.delivery.repository_sandbox import IsolatedRepositorySandbox
+from ai_hq.delivery.runtime import DeliveryRuntime
+from ai_hq.delivery.service import DeliveryService
 from ai_hq.departments.runner import DepartmentRunner
 from ai_hq.departments.sysadmin import SysAdminService
 from ai_hq.host_helper.client import HostHelperClient, HostHelperError
@@ -66,6 +77,38 @@ def build_department_runner(settings: Settings) -> DepartmentRunner:
     )
 
 
+def _build_verified_delivery_runner(
+    settings: Settings,
+    *,
+    session_factory,
+) -> DeliveryAgentRunner | None:
+    source_path = getattr(settings, "ai_hq_repository_source_path", None)
+    sandbox_root = getattr(settings, "repository_sandbox_root_path", None)
+    if source_path is None or sandbox_root is None:
+        return None
+
+    model_client = build_chat_model_client(settings)
+    if model_client is None:
+        return None
+
+    profile = build_ai_hq_repository_profile(source_path=source_path)
+    profile_registry = RepositoryProfileRegistry((profile,))
+    sandbox = IsolatedRepositorySandbox(
+        profile_registry=profile_registry,
+        repository_key="ai-hq",
+        sandbox_root=sandbox_root,
+    )
+    runtime = DeliveryRuntime(DeliveryService(session_factory))
+
+    return DeliveryAgentRunner(
+        runtime=runtime,
+        developer=ModelBackedDeveloperAgent(model_client),
+        qa=ModelBackedQAAgent(model_client),
+        candidate_verifier=CandidateVerifier(),
+        workspace_service=sandbox,
+    )
+
+
 def build_autonomous_mission_runner(
     settings: Settings,
     *,
@@ -78,10 +121,10 @@ def build_autonomous_mission_runner(
 
         AutonomousMissionRunner -> MissionExecutor -> ToolGateway
 
-    Repository delivery candidates are deliberately fail-closed here until a
-    trusted isolated RepositoryWorkspaceService backend is explicitly wired
-    into a verified DeliveryAgentRunner. The worker never falls back to a
-    direct unverified candidate-metadata handoff.
+    Verified repository delivery is composed separately through the isolated
+    repository sandbox. It is enabled only when trusted repository paths and a
+    model client are configured. The worker never falls back to a direct
+    unverified candidate-metadata handoff.
     """
     if session_factory is None:
         session_factory = get_session_factory()
@@ -134,10 +177,15 @@ def build_autonomous_mission_runner(
     )
 
     executor = MissionExecutor(missions, gateway)
+    delivery_runner = _build_verified_delivery_runner(
+        settings,
+        session_factory=session_factory,
+    )
 
     return AutonomousMissionRunner(
         missions=missions,
         executor=executor,
+        delivery_runner=delivery_runner,
     )
 
 
