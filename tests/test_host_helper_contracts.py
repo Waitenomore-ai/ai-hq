@@ -18,6 +18,7 @@ def test_host_capabilities_are_exactly_the_controlled_set():
         "host.resources",
         "service.status",
         "service.restart",
+        "service.recover",
         "deployment.deploy",
         "deployment.rollback",
         "container.status",
