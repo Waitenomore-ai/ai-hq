@@ -56,10 +56,7 @@ def _bounded_value(value: Any, *, depth: int = 0) -> Any:
         return bounded
 
     if isinstance(value, (list, tuple)):
-        return [
-            _bounded_value(item, depth=depth + 1)
-            for item in value[:20]
-        ]
+        return [_bounded_value(item, depth=depth + 1) for item in value[:20]]
 
     return str(value)[:1024]
 
@@ -133,6 +130,22 @@ class RecoveryService:
                 )
         except Exception as exc:
             raise RecoveryPersistenceError("active recovery incident read failed") from exc
+
+    def incident_for_mission(self, mission_id: str) -> RecoveryIncident | None:
+        if not isinstance(mission_id, str) or not mission_id.strip():
+            return None
+        try:
+            with self.session_factory() as db:
+                return db.scalar(
+                    select(RecoveryIncident)
+                    .where(
+                        RecoveryIncident.recovery_mission_id == mission_id,
+                        RecoveryIncident.active_key.is_not(None),
+                    )
+                    .limit(1)
+                )
+        except Exception as exc:
+            raise RecoveryPersistenceError("recovery mission incident lookup failed") from exc
 
     def update_diagnostics(
         self,
@@ -299,20 +312,12 @@ class RecoveryService:
                 ) or 0
 
                 if real_attempts >= self.attempt_budget:
-                    return RecoveryAllowance(
-                        False,
-                        "budget_exhausted",
-                        int(real_attempts),
-                    )
+                    return RecoveryAllowance(False, "budget_exhausted", int(real_attempts))
 
                 if incident.last_recovery_attempt_at is not None:
                     elapsed = now - _utc(incident.last_recovery_attempt_at)
                     if elapsed < timedelta(seconds=self.cooldown_seconds):
-                        return RecoveryAllowance(
-                            False,
-                            "cooldown",
-                            int(real_attempts),
-                        )
+                        return RecoveryAllowance(False, "cooldown", int(real_attempts))
 
                 return RecoveryAllowance(True, "allowed", int(real_attempts))
         except (KeyError, ValueError):
@@ -335,8 +340,7 @@ class RecoveryService:
                     .where(
                         RecoveryIncident.id == incident_id,
                         RecoveryIncident.active_key.is_not(None),
-                        RecoveryIncident.state
-                        == RecoveryIncidentState.RECOVERY_PENDING,
+                        RecoveryIncident.state == RecoveryIncidentState.RECOVERY_PENDING,
                         RecoveryIncident.recovery_mission_id.is_(None),
                     )
                     .values(recovery_mission_id=mission_id)
@@ -346,9 +350,7 @@ class RecoveryService:
                     db.commit()
                     incident = db.get(RecoveryIncident, incident_id)
                     if incident is None:
-                        raise RecoveryPersistenceError(
-                            "attached recovery incident disappeared"
-                        )
+                        raise RecoveryPersistenceError("attached recovery incident disappeared")
                     return incident
 
                 db.rollback()
@@ -375,8 +377,7 @@ class RecoveryService:
                     .where(
                         RecoveryIncident.id == incident_id,
                         RecoveryIncident.active_key.is_not(None),
-                        RecoveryIncident.state
-                        == RecoveryIncidentState.RECOVERY_PENDING,
+                        RecoveryIncident.state == RecoveryIncidentState.RECOVERY_PENDING,
                     )
                     .values(
                         state=RecoveryIncidentState.RECOVERING,
