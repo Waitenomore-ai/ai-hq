@@ -1,15 +1,15 @@
 """add recovery incidents and attempts
 
-Revision ID: 0012_recovery_incidents
-Revises: 0011_sysadmin_chat
+Revision ID: 0014_recovery_incidents
+Revises: 0013_delivery_orchestration
 """
 
 from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0012_recovery_incidents"
-down_revision = "0011_sysadmin_chat"
+revision = "0014_recovery_incidents"
+down_revision = "0013_delivery_orchestration"
 branch_labels = None
 depends_on = None
 

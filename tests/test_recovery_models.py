@@ -234,14 +234,14 @@ def test_recovery_tables_have_required_persistence_fields():
 
 def test_recovery_migration_has_expected_revision_chain():
     migration = Path(
-        "migrations/versions/0012_recovery_incidents.py"
+        "migrations/versions/0014_recovery_incidents.py"
     )
 
     assert migration.is_file()
 
     text = migration.read_text()
 
-    assert 'revision = "0012_recovery_incidents"' in text
-    assert 'down_revision = "0011_sysadmin_chat"' in text
+    assert 'revision = "0014_recovery_incidents"' in text
+    assert 'down_revision = "0013_delivery_orchestration"' in text
     assert '"recovery_incidents"' in text
     assert '"recovery_attempts"' in text
