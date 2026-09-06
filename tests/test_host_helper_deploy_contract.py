@@ -44,15 +44,23 @@ def test_systemd_helper_has_no_public_network_listener_and_is_hardened():
     assert "ListenStream" not in text
 
 
-def test_compose_keeps_socket_worker_only_without_docker_socket_or_privileged_mode():
+def test_compose_keeps_restart_safe_socket_mount_worker_only_and_read_only():
     compose = yaml.safe_load(COMPOSE.read_text())
     services = compose["services"]
-    worker_text = repr(services["worker"])
-    web_text = repr(services["web"])
-    assert "host-helper.sock" in worker_text
-    assert "host-helper.sock" not in web_text
+    worker_volumes = services["worker"].get("volumes", [])
+    web_volumes = services["web"].get("volumes", [])
+
+    assert "/run/ai-hq:/run/ai-hq:ro" in worker_volumes
+    assert all("host-helper.sock:" not in str(volume) for volume in worker_volumes)
+    assert all("/run/ai-hq" not in str(volume) for volume in web_volumes)
     assert "/var/run/docker.sock" not in COMPOSE.read_text()
     assert all(service.get("privileged") is not True for service in services.values())
+
+
+def test_systemd_preserves_runtime_directory_across_helper_restarts():
+    text = UNIT.read_text()
+    assert "RuntimeDirectory=ai-hq" in text
+    assert "RuntimeDirectoryPreserve=yes" in text
 
 
 def test_deploy_preflights_socket_before_starting_new_worker():
