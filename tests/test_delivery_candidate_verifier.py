@@ -121,6 +121,13 @@ def test_verifier_records_machine_generated_repository_and_test_evidence():
     }
 
 
+def test_verifier_fails_closed_when_workspace_tests_fail():
+    failed_tests = machine_test_evidence(passed=False, exit_code=1)
+
+    with pytest.raises(ValueError, match="workspace tests must pass"):
+        verify(mission_id="mission-failed-tests", tests=failed_tests)
+
+
 def test_verifier_rejects_missing_summary():
     bad = proposal()
     bad["summary"] = ""
