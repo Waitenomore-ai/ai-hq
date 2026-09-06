@@ -1,13 +1,16 @@
+from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import ai_hq.worker as worker
 from ai_hq.db import Base
+from ai_hq.delivery.agent_runner import DeliveryAgentRunner
+from ai_hq.delivery.repository_sandbox import IsolatedRepositorySandbox
 from ai_hq.missions.executor import MissionExecutor
 from ai_hq.missions.worker import AutonomousMissionRunner
 from ai_hq.tool_gateway.service import ToolGateway
-import ai_hq.worker as worker
-
 
 
 def isolated_session_factory():
@@ -22,27 +25,24 @@ def isolated_session_factory():
         expire_on_commit=False,
     )
 
+
+class FakeSettings:
+    host_helper_credential = None
+    host_helper_socket = "/unused"
+    ai_hq_repository_source_path = None
+    repository_sandbox_root_path = None
+
+
+class FakeModelClient:
+    def reply(self, system_prompt, messages):
+        raise AssertionError("model must not be invoked while wiring the worker")
+
+
 def test_real_worker_exposes_autonomous_runner_builder():
     assert hasattr(worker, "build_autonomous_mission_runner")
 
 
-def test_real_worker_autonomous_builder_returns_gateway_backed_runner(monkeypatch):
-    """
-    The production worker's autonomous path must be:
-
-        worker -> AutonomousMissionRunner
-               -> MissionExecutor
-               -> ToolGateway
-
-    It must not route autonomous missions through DepartmentRunner,
-    SysAdminService, Host Helper, an adapter, transport, or subprocess
-    directly.
-    """
-
-    class FakeSettings:
-        host_helper_credential = None
-        host_helper_socket = "/unused"
-
+def test_real_worker_autonomous_builder_returns_gateway_backed_runner():
     runner = worker.build_autonomous_mission_runner(
         FakeSettings(),
         session_factory=isolated_session_factory(),
@@ -54,16 +54,62 @@ def test_real_worker_autonomous_builder_returns_gateway_backed_runner(monkeypatc
 
 
 def test_autonomous_runner_builder_does_not_return_legacy_department_runner():
-    class FakeSettings:
-        host_helper_credential = None
-        host_helper_socket = "/unused"
-
     runner = worker.build_autonomous_mission_runner(
         FakeSettings(),
         session_factory=isolated_session_factory(),
     )
 
     assert not isinstance(runner, worker.DepartmentRunner)
+
+
+def test_configured_worker_wires_verified_ai_hq_repository_sandbox(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "src").mkdir()
+    (source / "src" / "example.py").write_text("VALUE = 1\n")
+    sandbox_root = tmp_path / "sandbox"
+
+    class ConfiguredSettings(FakeSettings):
+        ai_hq_repository_source_path = Path(source).resolve()
+        repository_sandbox_root_path = Path(sandbox_root).resolve()
+
+    monkeypatch.setattr(
+        worker,
+        "build_chat_model_client",
+        lambda settings: FakeModelClient(),
+        raising=False,
+    )
+
+    runner = worker.build_autonomous_mission_runner(
+        ConfiguredSettings(),
+        session_factory=isolated_session_factory(),
+    )
+
+    assert isinstance(runner.delivery_runner, DeliveryAgentRunner)
+    assert isinstance(
+        runner.delivery_runner.workspace_service,
+        IsolatedRepositorySandbox,
+    )
+    workspace = runner.delivery_runner.workspace_service.prepare(mission_id="mission-1")
+    assert workspace.repository == "ai-hq"
+    assert workspace.workspace_id
+    assert sandbox_root.exists()
+
+
+def test_worker_stays_fail_closed_when_repository_sandbox_is_unconfigured(monkeypatch):
+    monkeypatch.setattr(
+        worker,
+        "build_chat_model_client",
+        lambda settings: FakeModelClient(),
+        raising=False,
+    )
+
+    runner = worker.build_autonomous_mission_runner(
+        FakeSettings(),
+        session_factory=isolated_session_factory(),
+    )
+
+    assert runner.delivery_runner is None
 
 
 class FakeAutonomousRunner:
@@ -127,13 +173,14 @@ def test_worker_iteration_reports_idle_when_neither_path_has_work():
     assert autonomous.calls == 1
     assert legacy.calls == 1
 
+
 def test_autonomous_worker_registers_read_only_operational_capabilities():
-    class FakeSettings:
+    class HostSettings(FakeSettings):
         host_helper_credential = "test-credential"
         host_helper_socket = "/tmp/test-host-helper.sock"
 
     runner = worker.build_autonomous_mission_runner(
-        FakeSettings(),
+        HostSettings(),
         session_factory=isolated_session_factory(),
     )
 
@@ -145,12 +192,12 @@ def test_autonomous_worker_registers_read_only_operational_capabilities():
 
 
 def test_autonomous_worker_keeps_mutating_operations_unregistered():
-    class FakeSettings:
+    class HostSettings(FakeSettings):
         host_helper_credential = "test-credential"
         host_helper_socket = "/tmp/test-host-helper.sock"
 
     runner = worker.build_autonomous_mission_runner(
-        FakeSettings(),
+        HostSettings(),
         session_factory=isolated_session_factory(),
     )
 
@@ -162,10 +209,6 @@ def test_autonomous_worker_keeps_mutating_operations_unregistered():
 
 
 def test_autonomous_worker_stays_fail_closed_without_host_helper_credential():
-    class FakeSettings:
-        host_helper_credential = None
-        host_helper_socket = "/tmp/test-host-helper.sock"
-
     runner = worker.build_autonomous_mission_runner(
         FakeSettings(),
         session_factory=isolated_session_factory(),
