@@ -2,7 +2,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ai_hq.agents.models import Agent
 from ai_hq.db import Base
 from ai_hq.missions.executor import MissionExecutor
 from ai_hq.missions.models import (
