@@ -45,6 +45,11 @@ class CandidateVerifier:
             raise ValueError("proposal summary is required")
         summary = summary.strip()
 
+        if not test_evidence.passed or test_evidence.exit_code != 0:
+            raise ValueError(
+                "workspace tests must pass before candidate verification"
+            )
+
         identity_payload = snapshot.identity_payload(
             mission_id=mission_id.strip()
         )
