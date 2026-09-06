@@ -110,7 +110,7 @@ class DeliveryAgentRunner:
         workspace: RepositoryWorkspace,
     ) -> None:
         if not isinstance(candidate, dict):
-            raise ValueError("developer candidate must be a mapping")
+            raise TypeError("developer candidate must be a mapping")
 
         summary = candidate.get("summary")
         if not isinstance(summary, str) or not summary.strip():
@@ -150,7 +150,7 @@ class DeliveryAgentRunner:
         )
 
         if not isinstance(result, dict):
-            raise ValueError("QA result must be a mapping")
+            raise TypeError("QA result must be a mapping")
 
         qa_result = result.get("result")
         try:
