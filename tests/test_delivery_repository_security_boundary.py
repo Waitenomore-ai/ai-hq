@@ -1,7 +1,6 @@
 import ast
 from pathlib import Path
 
-
 DELIVERY_MODULES = (
     Path("src/ai_hq/delivery/agent_runner.py"),
     Path("src/ai_hq/delivery/candidate_verifier.py"),
