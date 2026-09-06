@@ -5,6 +5,7 @@ from enum import StrEnum
 class HostCapability(StrEnum):
     HOST_HEALTH = "host.health"
     HOST_RESOURCES = "host.resources"
+    DRIPVID_READINESS = "dripvid.readiness"
     SERVICE_STATUS = "service.status"
     SERVICE_RESTART = "service.restart"
     SERVICE_RECOVER = "service.recover"
@@ -87,7 +88,11 @@ def validate_request(payload: dict, allow_lists: HostAllowLists) -> HelperReques
         raise TypeError("invalid parameters")
 
     target = payload.get("target")
-    if capability in {HostCapability.HOST_HEALTH, HostCapability.HOST_RESOURCES}:
+    if capability in {
+        HostCapability.HOST_HEALTH,
+        HostCapability.HOST_RESOURCES,
+        HostCapability.DRIPVID_READINESS,
+    }:
         if target is not None:
             raise ValueError("target not allowed")
         if params:
