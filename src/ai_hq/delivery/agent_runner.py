@@ -5,6 +5,8 @@ from typing import Any, Protocol
 from ai_hq.delivery.candidate_verifier import CandidateVerifier
 from ai_hq.delivery.models import Delivery, QAResult
 from ai_hq.delivery.repository_workspace import (
+    FileChange,
+    FileOperation,
     RepositoryWorkspace,
     RepositoryWorkspaceService,
 )
@@ -119,7 +121,11 @@ class DeliveryAgentRunner:
         if self.workspace_service is None or self.candidate_verifier is None:
             raise ValueError("verified candidate dependencies are required")
 
-        snapshot = self.workspace_service.snapshot(workspace=workspace)
+        changes = self._candidate_file_changes(candidate)
+        snapshot = self.workspace_service.apply_changes(
+            workspace=workspace,
+            changes=changes,
+        )
         test_evidence = self.workspace_service.run_tests(workspace=workspace)
 
         verified = self.candidate_verifier.verify(
@@ -136,6 +142,45 @@ class DeliveryAgentRunner:
             changed_files=list(verified.changed_files),
             evidence=dict(verified.evidence),
         )
+
+    @staticmethod
+    def _candidate_file_changes(candidate: dict[str, Any]) -> tuple[FileChange, ...]:
+        raw_changes = candidate.get("changes")
+        if not isinstance(raw_changes, list):
+            raise ValueError("developer candidate changes must be a list")
+
+        changes: list[FileChange] = []
+        for index, raw_change in enumerate(raw_changes):
+            if not isinstance(raw_change, dict):
+                raise ValueError(f"developer change {index} must be an object")
+
+            path = raw_change.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError(f"developer change {index} requires path")
+
+            raw_operation = raw_change.get("operation")
+            try:
+                operation = FileOperation(raw_operation)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"developer change {index} has invalid operation"
+                ) from None
+
+            if "content" not in raw_change:
+                raise ValueError(f"developer change {index} requires content")
+
+            content = raw_change.get("content")
+            try:
+                change = FileChange(
+                    path=path,
+                    operation=operation,
+                    content=content,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"developer change {index} is invalid: {exc}") from exc
+            changes.append(change)
+
+        return tuple(changes)
 
     def run_qa(
         self,
