@@ -10,10 +10,13 @@ from ai_hq.host_helper.contracts import HelperRequest, HelperResponse, HostCapab
 
 
 def run_server(socket_path: Path, response: bytes, seen: list[dict]) -> threading.Thread:
+    ready = threading.Event()
+
     def serve():
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
             server.bind(str(socket_path))
             server.listen(1)
+            ready.set()
             connection, _ = server.accept()
             with connection:
                 request = b""
@@ -25,12 +28,10 @@ def run_server(socket_path: Path, response: bytes, seen: list[dict]) -> threadin
                 seen.append(json.loads(request))
                 connection.sendall(response)
 
-    thread = threading.Thread(target=serve)
+    thread = threading.Thread(target=serve, daemon=True)
     thread.start()
-    for _ in range(100):
-        if socket_path.exists():
-            break
-        threading.Event().wait(0.01)
+    if not ready.wait(timeout=2):
+        raise RuntimeError("test Host Helper server did not become ready")
     return thread
 
 
