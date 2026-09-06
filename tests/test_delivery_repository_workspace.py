@@ -4,6 +4,8 @@ import pytest
 
 from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
+    FileChange,
+    FileOperation,
     RepositoryWorkspace,
     RepositoryWorkspaceService,
 )
@@ -95,7 +97,34 @@ def test_test_evidence_is_immutable_bounded_and_validated():
         )
 
 
-def test_workspace_service_protocol_does_not_expose_generic_shell():
+def test_file_change_is_immutable_and_write_requires_content():
+    change = FileChange(
+        path="src/example.py",
+        operation=FileOperation.WRITE,
+        content="print('ok')\n",
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        change.path = "other.py"
+
+    with pytest.raises(ValueError, match="content"):
+        FileChange(path="src/example.py", operation=FileOperation.WRITE)
+
+
+def test_delete_rejects_content():
+    with pytest.raises(ValueError, match="content"):
+        FileChange(
+            path="src/example.py",
+            operation=FileOperation.DELETE,
+            content="not allowed",
+        )
+
+
+def test_workspace_service_protocol_exposes_typed_changes_not_shell():
+    names = set(dir(RepositoryWorkspaceService))
+
+    assert "apply_changes" in names
+
     forbidden = {
         "run",
         "execute",
@@ -103,5 +132,4 @@ def test_workspace_service_protocol_does_not_expose_generic_shell():
         "shell",
         "command",
     }
-
-    assert forbidden.isdisjoint(set(dir(RepositoryWorkspaceService)))
+    assert forbidden.isdisjoint(names)
