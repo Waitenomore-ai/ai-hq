@@ -6,6 +6,8 @@ from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
     RepositoryWorkspace,
     RepositoryWorkspaceService,
+)
+from ai_hq.delivery.repository_workspace import (
     TestEvidence as WorkspaceTestEvidence,
 )
 
