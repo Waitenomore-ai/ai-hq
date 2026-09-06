@@ -31,14 +31,16 @@ def test_installer_builds_dedicated_venv_installs_unit_and_waits_for_socket():
     assert "test -S /run/ai-hq/host-helper.sock" in text
 
 
-def test_systemd_helper_has_no_network_listener_and_is_hardened():
+def test_systemd_helper_has_no_public_network_listener_and_is_hardened():
     text = UNIT.read_text()
-    assert "RestrictAddressFamilies=AF_UNIX" in text
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET" in text
+    assert "IPAddressDeny=any" in text
+    assert "IPAddressAllow=127.0.0.1" in text
+    assert "AF_INET6" not in text
     assert "NoNewPrivileges=true" in text
     assert "ProtectSystem=strict" in text
     assert "EnvironmentFile=/etc/ai-hq/host-helper.env" in text
     assert "0.0.0.0" not in text
-    assert "127.0.0.1" not in text
     assert "ListenStream" not in text
 
 
