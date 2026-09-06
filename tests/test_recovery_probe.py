@@ -3,9 +3,12 @@ from dataclasses import FrozenInstanceError
 import httpx
 import pytest
 
+from ai_hq.host_helper.client import HostHelperError
+from ai_hq.host_helper.contracts import HelperResponse, HostCapability
 from ai_hq.recovery.probe import (
     MAX_READINESS_BYTES,
     DripVidReadinessProbe,
+    HostHelperDripVidReadinessProbe,
     recovery_diagnostic_targets,
 )
 
@@ -213,6 +216,104 @@ def test_probe_never_returns_headers_cookies_or_unrecognized_fields():
 def test_probe_rejects_non_loopback_http_url(url):
     with pytest.raises(ValueError, match="loopback HTTP"):
         DripVidReadinessProbe(url)
+
+
+class FakeHostHelperClient:
+    def __init__(self, response=None, error: Exception | None = None):
+        self.response = response
+        self.error = error
+        self.calls = 0
+
+    def dripvid_readiness(self):
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+
+def test_host_helper_probe_returns_only_bounded_readiness_fields():
+    response = HelperResponse(
+        ok=True,
+        capability=HostCapability.DRIPVID_READINESS,
+        target=None,
+        data={
+            "reachable": True,
+            "status_code": 200,
+            "ok": True,
+            "database": True,
+            "jellyfin": True,
+            "radarr": True,
+            "sonarr": True,
+            "qbittorrent": True,
+            "requestSync": True,
+            "storage": {
+                "available": True,
+                "writable": True,
+                "belowReserve": False,
+                "freeBytes": 250 * 1024**3,
+                "reserveBytes": 50 * 1024**3,
+                "root": "/mnt/TV",
+            },
+            "error": None,
+            "apiKey": "must-not-survive",
+            "body": "must-not-survive",
+        },
+    )
+    client = FakeHostHelperClient(response=response)
+
+    result = HostHelperDripVidReadinessProbe(client).probe()
+
+    assert client.calls == 1
+    assert result == {
+        "reachable": True,
+        "status_code": 200,
+        "ok": True,
+        "database": True,
+        "jellyfin": True,
+        "radarr": True,
+        "sonarr": True,
+        "qbittorrent": True,
+        "requestSync": True,
+        "storage": {
+            "available": True,
+            "writable": True,
+            "belowReserve": False,
+            "freeBytes": 250 * 1024**3,
+            "reserveBytes": 50 * 1024**3,
+        },
+        "error": None,
+    }
+    assert "apiKey" not in repr(result)
+    assert "body" not in repr(result)
+    assert "/mnt/TV" not in repr(result)
+
+
+def test_host_helper_probe_fails_closed_when_helper_unavailable():
+    client = FakeHostHelperClient(error=HostHelperError("connection_failed"))
+
+    assert HostHelperDripVidReadinessProbe(client).probe() == {
+        "reachable": False,
+        "status_code": None,
+        "ok": False,
+        "error": "host_helper_unavailable",
+    }
+
+
+def test_host_helper_probe_fails_closed_on_helper_protocol_failure():
+    response = HelperResponse(
+        ok=False,
+        capability=HostCapability.DRIPVID_READINESS,
+        target=None,
+        data={},
+        error="malformed_response",
+    )
+
+    assert HostHelperDripVidReadinessProbe(FakeHostHelperClient(response=response)).probe() == {
+        "reachable": False,
+        "status_code": None,
+        "ok": False,
+        "error": "host_helper_unavailable",
+    }
 
 
 def test_diagnostic_targets_are_fixed_server_side_and_read_only():
