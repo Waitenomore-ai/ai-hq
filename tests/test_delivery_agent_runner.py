@@ -7,6 +7,8 @@ from ai_hq.delivery.candidate_verifier import CandidateVerifier
 from ai_hq.delivery.models import DeliveryStage, QAResult
 from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
+    FileChange,
+    FileOperation,
     RepositoryWorkspace,
 )
 from ai_hq.delivery.repository_workspace import (
@@ -133,10 +135,10 @@ class FakeWorkspaceService:
             workspace_id=self.workspace.workspace_id,
         )
 
-    def snapshot(self, *, workspace):
-        self.calls.append(("snapshot", workspace.workspace_id))
-        if self.fail_at == "snapshot":
-            raise RuntimeError("snapshot failed")
+    def apply_changes(self, *, workspace, changes):
+        self.calls.append(("apply_changes", workspace.workspace_id, changes))
+        if self.fail_at == "apply_changes":
+            raise RuntimeError("apply_changes failed")
         return CandidateSnapshot(
             workspace_id=workspace.workspace_id,
             repository=workspace.repository,
@@ -145,6 +147,9 @@ class FakeWorkspaceService:
             diff_digest="sha256:" + ("a" * 64),
             content_digest="sha256:" + ("b" * 64),
         )
+
+    def snapshot(self, *, workspace):
+        raise AssertionError("runner must use apply_changes snapshot directly")
 
     def run_tests(self, *, workspace):
         self.calls.append(("run_tests", workspace.workspace_id))
@@ -160,11 +165,37 @@ class FakeWorkspaceService:
 
 def developer_candidate():
     return {
-        "change_ref": "MODEL-INVENTED-REF",
         "summary": "Developer implementation candidate",
+        "changes": [
+            {
+                "path": "src/real.py",
+                "operation": "write",
+                "content": "VALUE = 2\n",
+            },
+            {
+                "path": "tests/test_real.py",
+                "operation": "delete",
+                "content": None,
+            },
+        ],
+        "change_ref": "MODEL-INVENTED-REF",
         "changed_files": ["model/claimed.py"],
         "evidence": {"source": "developer", "tests": "claimed pass"},
     }
+
+
+def expected_file_changes():
+    return (
+        FileChange(
+            path="src/real.py",
+            operation=FileOperation.WRITE,
+            content="VALUE = 2\n",
+        ),
+        FileChange(
+            path="tests/test_real.py",
+            operation=FileOperation.DELETE,
+        ),
+    )
 
 
 def qa_pass():
@@ -181,9 +212,9 @@ def qa_fail():
     }
 
 
-def developer_runner(*, workspace_service=None):
+def developer_runner(*, workspace_service=None, candidate=None):
     runtime = FakeDeliveryRuntime()
-    developer = FakeDeveloper(developer_candidate())
+    developer = FakeDeveloper(candidate or developer_candidate())
     runner = DeliveryAgentRunner(
         runtime=runtime,
         developer=developer,
@@ -194,17 +225,15 @@ def developer_runner(*, workspace_service=None):
     return runner, runtime, developer
 
 
-def test_developer_stage_uses_workspace_machine_state_for_persistence():
+def test_developer_stage_applies_typed_changes_and_uses_machine_snapshot():
     workspace_service = FakeWorkspaceService()
-    runner, runtime, developer = developer_runner(
-        workspace_service=workspace_service
-    )
+    runner, runtime, developer = developer_runner(workspace_service=workspace_service)
 
     assert runner.run_developer(mission_id="mission-1") is True
     assert developer.calls == ["mission-1"]
     assert workspace_service.calls == [
         ("prepare", "mission-1"),
-        ("snapshot", "workspace-1"),
+        ("apply_changes", "workspace-1", expected_file_changes()),
         ("run_tests", "workspace-1"),
     ]
 
@@ -222,6 +251,22 @@ def test_developer_stage_uses_workspace_machine_state_for_persistence():
     assert "source" not in call["evidence"]
 
 
+def test_invalid_developer_change_fails_before_workspace_mutation():
+    workspace_service = FakeWorkspaceService()
+    bad = developer_candidate()
+    bad["changes"] = [{"path": "src/a.py", "operation": "rename", "content": "x"}]
+    runner, runtime, _ = developer_runner(
+        workspace_service=workspace_service,
+        candidate=bad,
+    )
+
+    with pytest.raises(ValueError, match="operation|change"):
+        runner.run_developer(mission_id="mission-1")
+
+    assert workspace_service.calls == [("prepare", "mission-1")]
+    assert runtime.developer_calls == []
+
+
 def test_failed_machine_tests_fail_closed_before_runtime_handoff():
     workspace_service = FakeWorkspaceService(tests_passed=False)
     runner, runtime, _ = developer_runner(workspace_service=workspace_service)
@@ -232,7 +277,7 @@ def test_failed_machine_tests_fail_closed_before_runtime_handoff():
     assert runtime.developer_calls == []
 
 
-@pytest.mark.parametrize("fail_at", ["prepare", "snapshot", "run_tests"])
+@pytest.mark.parametrize("fail_at", ["prepare", "apply_changes", "run_tests"])
 def test_workspace_failures_fail_closed_before_runtime_handoff(fail_at):
     workspace_service = FakeWorkspaceService(fail_at=fail_at)
     runner, runtime, _ = developer_runner(workspace_service=workspace_service)
