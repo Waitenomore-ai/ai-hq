@@ -4,178 +4,144 @@ from ai_hq.delivery.candidate_verifier import (
     CandidateVerifier,
     VerifiedCandidate,
 )
+from ai_hq.delivery.repository_workspace import (
+    CandidateSnapshot,
+    TestEvidence,
+)
 
 
 def proposal():
     return {
         "change_ref": "MODEL-INVENTED-REF-MUST-NOT-BE-TRUSTED",
         "summary": "Add safe Developer and QA orchestration",
-        "changed_files": [
-            "src/ai_hq/delivery/example.py",
-            "tests/test_delivery_example.py",
-        ],
-        "evidence": {
-            "model_claim": "tests passed",
-        },
+        "changed_files": ["model/claimed.py"],
+        "evidence": {"model_claim": "tests passed"},
     }
 
 
+def snapshot(*, diff_char="a", content_char="b", files=None):
+    return CandidateSnapshot(
+        workspace_id="workspace-1",
+        repository="Waitenomore-ai/ai-hq",
+        base_ref="abc123",
+        changed_files=tuple(files or ("src/real.py", "tests/test_real.py")),
+        diff_digest="sha256:" + (diff_char * 64),
+        content_digest="sha256:" + (content_char * 64),
+    )
+
+
+def test_evidence(*, passed=True, exit_code=0):
+    return TestEvidence(
+        passed=passed,
+        exit_code=exit_code,
+        summary="42 passed" if passed else "1 failed",
+        evidence_digest="sha256:" + ("c" * 64),
+    )
+
+
+def verify(*, mission_id="mission-1", candidate=None, snap=None, tests=None):
+    return CandidateVerifier().verify(
+        mission_id=mission_id,
+        proposal=candidate or proposal(),
+        snapshot=snap or snapshot(),
+        test_evidence=tests or test_evidence(),
+    )
+
+
 def test_verifier_returns_verified_candidate():
-    verifier = CandidateVerifier()
-
-    result = verifier.verify(
-        mission_id="mission-1",
-        proposal=proposal(),
-    )
-
-    assert isinstance(result, VerifiedCandidate)
+    assert isinstance(verify(), VerifiedCandidate)
 
 
-def test_verifier_does_not_trust_model_change_ref():
-    verifier = CandidateVerifier()
+def test_verifier_ignores_model_change_ref_and_claimed_files():
+    result = verify()
 
-    result = verifier.verify(
-        mission_id="mission-2",
-        proposal=proposal(),
-    )
-
-    assert result.change_ref
-    assert result.change_ref != (
-        "MODEL-INVENTED-REF-MUST-NOT-BE-TRUSTED"
-    )
+    assert result.change_ref.startswith("sha256:")
+    assert result.change_ref != proposal()["change_ref"]
+    assert result.changed_files == ["src/real.py", "tests/test_real.py"]
+    assert "model/claimed.py" not in result.changed_files
 
 
-def test_change_ref_is_deterministic_for_exact_candidate():
-    verifier = CandidateVerifier()
-
-    first = verifier.verify(
-        mission_id="mission-3",
-        proposal=proposal(),
-    )
-
-    second = verifier.verify(
-        mission_id="mission-3",
-        proposal=proposal(),
-    )
+def test_change_ref_is_deterministic_for_exact_machine_snapshot():
+    first = verify(mission_id="mission-2")
+    second = verify(mission_id="mission-2")
 
     assert first.change_ref == second.change_ref
 
 
-def test_change_ref_changes_when_candidate_changes():
-    verifier = CandidateVerifier()
-
-    first_proposal = proposal()
-    second_proposal = proposal()
-
-    second_proposal["summary"] = (
-        "A materially different implementation"
+def test_change_ref_changes_when_snapshot_changes():
+    first = verify(
+        mission_id="mission-3",
+        snap=snapshot(diff_char="a"),
     )
-
-    first = verifier.verify(
-        mission_id="mission-4",
-        proposal=first_proposal,
-    )
-
-    second = verifier.verify(
-        mission_id="mission-4",
-        proposal=second_proposal,
+    second = verify(
+        mission_id="mission-3",
+        snap=snapshot(diff_char="d"),
     )
 
     assert first.change_ref != second.change_ref
 
 
-def test_model_evidence_is_not_promoted_to_verified_evidence():
-    verifier = CandidateVerifier()
+def test_human_readable_summary_does_not_define_candidate_identity():
+    first_candidate = proposal()
+    second_candidate = proposal()
+    second_candidate["summary"] = "Different descriptive wording"
 
-    result = verifier.verify(
-        mission_id="mission-5",
-        proposal=proposal(),
-    )
+    first = verify(mission_id="mission-4", candidate=first_candidate)
+    second = verify(mission_id="mission-4", candidate=second_candidate)
+
+    assert first.change_ref == second.change_ref
+    assert first.summary != second.summary
+
+
+def test_model_evidence_is_not_promoted_to_verified_evidence():
+    result = verify(mission_id="mission-5")
 
     assert "model_claim" not in result.evidence
+    assert "MODEL-INVENTED" not in str(result.evidence)
 
 
-def test_verifier_records_machine_generated_identity_evidence():
-    verifier = CandidateVerifier()
+def test_verifier_records_machine_generated_repository_and_test_evidence():
+    result = verify(mission_id="mission-6")
 
-    result = verifier.verify(
-        mission_id="mission-6",
-        proposal=proposal(),
-    )
-
-    assert result.evidence["verification"] == (
-        "candidate_identity_verified"
-    )
-
-    assert (
-        result.evidence["change_ref"]
-        == result.change_ref
-    )
-
-
-def test_verified_candidate_preserves_summary_and_files():
-    verifier = CandidateVerifier()
-
-    result = verifier.verify(
-        mission_id="mission-7",
-        proposal=proposal(),
-    )
-
-    assert result.summary == proposal()["summary"]
-    assert result.changed_files == proposal()["changed_files"]
+    assert result.evidence == {
+        "verification": "candidate_identity_verified",
+        "algorithm": "sha256",
+        "change_ref": result.change_ref,
+        "workspace_id": "workspace-1",
+        "repository": "Waitenomore-ai/ai-hq",
+        "base_ref": "abc123",
+        "diff_digest": "sha256:" + ("a" * 64),
+        "content_digest": "sha256:" + ("b" * 64),
+        "tests": {
+            "passed": True,
+            "exit_code": 0,
+            "summary": "42 passed",
+            "evidence_digest": "sha256:" + ("c" * 64),
+        },
+    }
 
 
 def test_verifier_rejects_missing_summary():
-    verifier = CandidateVerifier()
-
     bad = proposal()
     bad["summary"] = ""
 
     with pytest.raises(ValueError, match="summary"):
-        verifier.verify(
-            mission_id="mission-8",
-            proposal=bad,
-        )
-
-
-def test_verifier_rejects_invalid_changed_files():
-    verifier = CandidateVerifier()
-
-    bad = proposal()
-    bad["changed_files"] = "src/example.py"
-
-    with pytest.raises(
-        ValueError,
-        match="changed_files",
-    ):
-        verifier.verify(
-            mission_id="mission-9",
-            proposal=bad,
-        )
+        verify(mission_id="mission-7", candidate=bad)
 
 
 def test_verifier_rejects_non_mapping_proposal():
-    verifier = CandidateVerifier()
-
     with pytest.raises(ValueError, match="proposal"):
-        verifier.verify(
-            mission_id="mission-10",
+        CandidateVerifier().verify(
+            mission_id="mission-8",
             proposal="not-a-mapping",
+            snapshot=snapshot(),
+            test_evidence=test_evidence(),
         )
 
 
 def test_identity_is_bound_to_mission():
-    verifier = CandidateVerifier()
-
-    first = verifier.verify(
-        mission_id="mission-A",
-        proposal=proposal(),
-    )
-
-    second = verifier.verify(
-        mission_id="mission-B",
-        proposal=proposal(),
-    )
+    first = verify(mission_id="mission-A")
+    second = verify(mission_id="mission-B")
 
     assert first.change_ref != second.change_ref
 
