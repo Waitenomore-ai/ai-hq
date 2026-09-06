@@ -71,7 +71,7 @@ class AutonomousMissionRunner:
             return
 
         if not isinstance(candidate, dict):
-            raise ValueError("delivery candidate must be a mapping")
+            raise TypeError("delivery candidate must be a mapping")
 
         self.delivery_runner.persist_candidate(
             mission_id=mission_id,
