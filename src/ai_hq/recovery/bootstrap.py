@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Protocol
 
 from ai_hq.config import OperatingMode, Settings
 from ai_hq.db import get_session_factory
@@ -14,12 +14,19 @@ from ai_hq.operations.transport import HostHelperOperationalTransport
 from ai_hq.recovery.models import RecoveryIncidentState
 from ai_hq.recovery.observer import RecoveryObserver
 from ai_hq.recovery.policy import RECOVERY_COMPONENTS
-from ai_hq.recovery.probe import DripVidReadinessProbe, recovery_diagnostic_targets
+from ai_hq.recovery.probe import (
+    HostHelperDripVidReadinessProbe,
+    recovery_diagnostic_targets,
+)
 from ai_hq.recovery.service import RecoveryService
 from ai_hq.system_state import ensure_system_state
 
 
 MonotonicClock = Callable[[], float]
+
+
+class ReadinessProbe(Protocol):
+    def probe(self) -> dict[str, Any]: ...
 
 
 class RecoveryDiagnosticsReader:
@@ -55,7 +62,7 @@ class DripVidRecoveryCycle:
         self,
         recovery: RecoveryService,
         observer: RecoveryObserver,
-        probe: DripVidReadinessProbe,
+        probe: ReadinessProbe,
         diagnostics: RecoveryDiagnosticsReader,
     ) -> None:
         self.recovery = recovery
@@ -320,7 +327,7 @@ def build_recovery_coordinator(
         observe_only=settings.recovery_observe_only,
         notifications=notifications,
     )
-    probe = DripVidReadinessProbe(settings.recovery_dripvid_ready_url)
+    probe = HostHelperDripVidReadinessProbe(helper)
     cycle = DripVidRecoveryCycle(
         recovery,
         observer,
