@@ -1,8 +1,10 @@
 from enum import StrEnum
 from functools import lru_cache
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +31,19 @@ class Settings(BaseSettings):
     host_helper_credential: str | None = None
     repository_sandbox_root: str | None = None
     ai_hq_repository_source: str | None = None
+
+    # DripVid automatic-recovery policy. Recovery is deliberately disabled and
+    # observe-only by default. These values are operator configuration and are
+    # never accepted from a mission/model payload.
+    recovery_enabled: bool = False
+    recovery_observe_only: bool = True
+    recovery_observation_seconds: int = Field(default=30, ge=10, le=300)
+    recovery_failure_threshold: int = Field(default=3, ge=2, le=10)
+    recovery_cooldown_seconds: int = Field(default=300, ge=60)
+    recovery_attempt_budget: int = Field(default=2, ge=1, le=5)
+    recovery_budget_window_seconds: int = Field(default=3600, ge=60)
+    recovery_verify_seconds: int = Field(default=60, ge=10, le=300)
+    recovery_dripvid_ready_url: str = "http://127.0.0.1:3000/health/ready"
 
     # Provider-independent SysAdmin chat model boundary.
     # The configured endpoint must expose an OpenAI-compatible
@@ -80,6 +95,40 @@ class Settings(BaseSettings):
 
         if source == sandbox or source in sandbox.parents or sandbox in source.parents:
             raise ValueError("repository sandbox must not overlap the AI HQ repository source")
+        return self
+
+    @model_validator(mode="after")
+    def validate_recovery_policy(self) -> "Settings":
+        if self.recovery_budget_window_seconds < self.recovery_cooldown_seconds:
+            raise ValueError(
+                "AI HQ recovery budget window must be at least as long as the recovery cooldown"
+            )
+
+        if self.is_production:
+            parsed = urlsplit(self.recovery_dripvid_ready_url)
+            if parsed.scheme.casefold() != "http":
+                raise ValueError(
+                    "AI HQ production recovery readiness URL must use loopback HTTP"
+                )
+
+            host = parsed.hostname
+            if not host:
+                raise ValueError(
+                    "AI HQ production recovery readiness URL must use loopback HTTP"
+                )
+
+            if host.casefold() == "localhost":
+                loopback = True
+            else:
+                try:
+                    loopback = ip_address(host).is_loopback
+                except ValueError:
+                    loopback = False
+
+            if not loopback:
+                raise ValueError(
+                    "AI HQ production recovery readiness URL must use loopback HTTP"
+                )
         return self
 
     @model_validator(mode="after")
