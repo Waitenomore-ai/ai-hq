@@ -160,3 +160,65 @@ def test_unknown_workspace_fails_closed(tmp_path):
                 ),
             ),
         )
+
+
+def test_snapshot_is_deterministic_for_identical_workspace_state(tmp_path):
+    sandbox, _, _ = build_sandbox(tmp_path)
+    workspace = sandbox.prepare(mission_id="mission-1")
+    sandbox.apply_changes(
+        workspace=workspace,
+        changes=(
+            FileChange(
+                path="src/new.py",
+                operation=FileOperation.WRITE,
+                content="VALUE = 2\n",
+            ),
+        ),
+    )
+
+    first = sandbox.snapshot(workspace=workspace)
+    second = sandbox.snapshot(workspace=workspace)
+
+    assert first == second
+    assert first.changed_files == ("src/new.py",)
+
+
+def test_snapshot_digests_change_when_workspace_content_changes(tmp_path):
+    sandbox, _, _ = build_sandbox(tmp_path)
+    workspace = sandbox.prepare(mission_id="mission-1")
+
+    first = sandbox.apply_changes(
+        workspace=workspace,
+        changes=(
+            FileChange(
+                path="src/original.py",
+                operation=FileOperation.WRITE,
+                content="VALUE = 2\n",
+            ),
+        ),
+    )
+    second = sandbox.apply_changes(
+        workspace=workspace,
+        changes=(
+            FileChange(
+                path="src/original.py",
+                operation=FileOperation.WRITE,
+                content="VALUE = 3\n",
+            ),
+        ),
+    )
+
+    assert first.diff_digest != second.diff_digest
+    assert first.content_digest != second.content_digest
+
+
+def test_run_tests_rejects_workspace_changed_after_snapshot(tmp_path):
+    sandbox, _, sandbox_root = build_sandbox(tmp_path)
+    workspace = sandbox.prepare(mission_id="mission-1")
+    sandbox.snapshot(workspace=workspace)
+
+    workspace_path = only_workspace_path(sandbox_root)
+    (workspace_path / "src" / "original.py").write_text("MUTATED = True\n")
+
+    with pytest.raises(RuntimeError, match="stale"):
+        sandbox.run_tests(workspace=workspace)
