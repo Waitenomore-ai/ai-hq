@@ -222,17 +222,14 @@ def test_developer_stage_uses_workspace_machine_state_for_persistence():
     assert "source" not in call["evidence"]
 
 
-def test_failed_machine_tests_remain_trusted_evidence_not_model_claims():
+def test_failed_machine_tests_fail_closed_before_runtime_handoff():
     workspace_service = FakeWorkspaceService(tests_passed=False)
     runner, runtime, _ = developer_runner(workspace_service=workspace_service)
 
-    runner.run_developer(mission_id="mission-1")
+    with pytest.raises(ValueError, match="workspace tests must pass"):
+        runner.run_developer(mission_id="mission-1")
 
-    evidence = runtime.developer_calls[0]["evidence"]
-    assert evidence["tests"]["passed"] is False
-    assert evidence["tests"]["exit_code"] == 1
-    assert evidence["tests"]["summary"] == "1 failed"
-    assert "claimed pass" not in str(evidence)
+    assert runtime.developer_calls == []
 
 
 @pytest.mark.parametrize("fail_at", ["prepare", "snapshot", "run_tests"])
