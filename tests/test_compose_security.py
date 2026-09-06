@@ -2,20 +2,20 @@ from pathlib import Path
 
 import yaml
 
-SOCKET_BIND = "/run/ai-hq/host-helper.sock:/run/ai-hq/host-helper.sock"
+RUNTIME_BIND = "/run/ai-hq:/run/ai-hq:ro"
 
 
 def load_compose() -> dict:
     return yaml.safe_load(Path("compose.yaml").read_text())
 
 
-def test_host_helper_socket_is_mounted_only_into_worker():
+def test_host_helper_runtime_is_mounted_read_only_only_into_worker():
     services = load_compose()["services"]
     worker_volumes = services["worker"].get("volumes", [])
     web_volumes = services["web"].get("volumes", [])
 
-    assert SOCKET_BIND in worker_volumes
-    assert all("host-helper.sock" not in str(volume) for volume in web_volumes)
+    assert RUNTIME_BIND in worker_volumes
+    assert all("/run/ai-hq" not in str(volume) for volume in web_volumes)
 
 
 def test_ai_hq_compose_has_no_docker_socket_or_privileged_service():
