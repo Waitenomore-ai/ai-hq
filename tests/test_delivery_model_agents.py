@@ -22,110 +22,105 @@ class FakeModelClient:
         return self.response
 
 
-def test_developer_returns_strict_structured_candidate():
-    client = FakeModelClient(json.dumps({
-        "change_ref": "immutable-dev-abc123",
+def developer_payload(*, changes=None, **extra):
+    payload = {
         "summary": "Implement delivery orchestration",
-        "changed_files": [
-            "src/ai_hq/delivery/example.py",
-            "tests/test_delivery_example.py",
+        "changes": changes if changes is not None else [
+            {
+                "path": "src/ai_hq/delivery/example.py",
+                "operation": "write",
+                "content": "VALUE = 1\n",
+            },
+            {
+                "path": "src/ai_hq/delivery/obsolete.py",
+                "operation": "delete",
+                "content": None,
+            },
         ],
-        "evidence": {
-            "tests": "12 passed",
-            "review": "implementation complete",
-        },
-    }))
+    }
+    payload.update(extra)
+    return payload
 
+
+def test_developer_returns_strict_structured_file_changes():
+    client = FakeModelClient(json.dumps(developer_payload()))
     developer = ModelBackedDeveloperAgent(client)
 
-    result = developer.execute(
-        mission_id="mission-1",
-    )
+    result = developer.execute(mission_id="mission-1")
 
-    assert result == {
-        "change_ref": "immutable-dev-abc123",
-        "summary": "Implement delivery orchestration",
-        "changed_files": [
-            "src/ai_hq/delivery/example.py",
-            "tests/test_delivery_example.py",
-        ],
-        "evidence": {
-            "tests": "12 passed",
-            "review": "implementation complete",
-        },
-    }
-
+    assert result == developer_payload()
     assert len(client.calls) == 1
 
 
-def test_developer_prompt_requires_immutable_reference_and_evidence():
-    client = FakeModelClient(json.dumps({
-        "change_ref": "ref-1",
-        "summary": "Candidate",
-        "changed_files": [],
-        "evidence": {
-            "tests": "passed",
-        },
-    }))
-
+def test_developer_prompt_requires_typed_changes_and_forbids_command_authority():
+    client = FakeModelClient(json.dumps(developer_payload()))
     developer = ModelBackedDeveloperAgent(client)
 
-    developer.execute(
-        mission_id="mission-2",
-    )
+    developer.execute(mission_id="mission-2")
 
     prompt = client.calls[0]["system_prompt"].lower()
-
-    assert "change_ref" in prompt
-    assert "immutable" in prompt
-    assert "evidence" in prompt
-    assert "json" in prompt
-
-
-def test_developer_rejects_missing_change_ref():
-    client = FakeModelClient(json.dumps({
-        "summary": "Candidate",
-        "changed_files": [],
-        "evidence": {
-            "tests": "passed",
-        },
-    }))
-
-    developer = ModelBackedDeveloperAgent(client)
-
-    with pytest.raises(ValueError, match="change_ref"):
-        developer.execute(
-            mission_id="mission-3",
-        )
+    assert "changes" in prompt
+    assert "write" in prompt
+    assert "delete" in prompt
+    assert "shell" in prompt
+    assert "deployment" in prompt
+    assert "push" in prompt
+    assert "merge" in prompt
 
 
-def test_developer_rejects_missing_evidence():
-    client = FakeModelClient(json.dumps({
-        "change_ref": "ref-3",
-        "summary": "Candidate",
-        "changed_files": [],
-        "evidence": {},
-    }))
+def test_developer_rejects_missing_summary():
+    payload = developer_payload()
+    payload.pop("summary")
+    developer = ModelBackedDeveloperAgent(FakeModelClient(json.dumps(payload)))
 
-    developer = ModelBackedDeveloperAgent(client)
+    with pytest.raises(ValueError, match="summary"):
+        developer.execute(mission_id="mission-3")
 
-    with pytest.raises(ValueError, match="evidence"):
-        developer.execute(
-            mission_id="mission-3",
-        )
+
+def test_developer_rejects_non_list_changes():
+    developer = ModelBackedDeveloperAgent(
+        FakeModelClient(json.dumps(developer_payload(changes={})))
+    )
+
+    with pytest.raises(ValueError, match="changes"):
+        developer.execute(mission_id="mission-4")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"operation": "write", "content": "x\n"},
+        {"path": "src/a.py", "operation": "rename", "content": "x\n"},
+        {"path": "src/a.py", "operation": "write", "content": None},
+        {"path": "src/a.py", "operation": "delete", "content": "x\n"},
+        {"path": "src/a.py", "operation": "delete"},
+    ],
+)
+def test_developer_rejects_invalid_change_shapes(change):
+    developer = ModelBackedDeveloperAgent(
+        FakeModelClient(json.dumps(developer_payload(changes=[change])))
+    )
+
+    expected = "content" if change.get("operation") == "delete" and "content" not in change else "change"
+    with pytest.raises(ValueError, match=expected):
+        developer.execute(mission_id="mission-5")
+
+
+@pytest.mark.parametrize("field", ["command", "argv", "shell"])
+def test_developer_rejects_command_control_fields(field):
+    developer = ModelBackedDeveloperAgent(
+        FakeModelClient(json.dumps(developer_payload(**{field: "blocked"})))
+    )
+
+    with pytest.raises(ValueError, match="command|authority|field"):
+        developer.execute(mission_id="mission-6")
 
 
 def test_developer_rejects_non_json_model_output():
-    client = FakeModelClient(
-        "I finished the implementation."
-    )
-
-    developer = ModelBackedDeveloperAgent(client)
+    developer = ModelBackedDeveloperAgent(FakeModelClient("I finished the implementation."))
 
     with pytest.raises(ValueError, match="JSON"):
-        developer.execute(
-            mission_id="mission-4",
-        )
+        developer.execute(mission_id="mission-7")
 
 
 def test_qa_receives_exact_change_reference():
@@ -136,17 +131,14 @@ def test_qa_receives_exact_change_reference():
             "review": "exact candidate verified",
         },
     }))
-
     qa = ModelBackedQAAgent(client)
 
     result = qa.review(
-        mission_id="mission-5",
+        mission_id="mission-8",
         change_ref="immutable-exact-555",
         summary="Exact proposal",
         changed_files=["src/example.py"],
-        developer_evidence={
-            "tests": "12 passed",
-        },
+        developer_evidence={"tests": "12 passed"},
     )
 
     assert result == {
@@ -156,11 +148,7 @@ def test_qa_receives_exact_change_reference():
             "review": "exact candidate verified",
         },
     }
-
-    messages = client.calls[0]["messages"]
-    serialized = json.dumps(messages)
-
-    assert "immutable-exact-555" in serialized
+    assert "immutable-exact-555" in json.dumps(client.calls[0]["messages"])
 
 
 def test_qa_can_fail_candidate():
@@ -171,17 +159,14 @@ def test_qa_can_fail_candidate():
             "review": "regression detected",
         },
     }))
-
     qa = ModelBackedQAAgent(client)
 
     result = qa.review(
-        mission_id="mission-6",
+        mission_id="mission-9",
         change_ref="immutable-failed-666",
         summary="Candidate",
         changed_files=["src/example.py"],
-        developer_evidence={
-            "tests": "developer tests passed",
-        },
+        developer_evidence={"tests": "developer tests passed"},
     )
 
     assert result["result"] is QAResult.FAILED
@@ -189,66 +174,47 @@ def test_qa_can_fail_candidate():
 
 
 def test_qa_rejects_invalid_result():
-    client = FakeModelClient(json.dumps({
+    qa = ModelBackedQAAgent(FakeModelClient(json.dumps({
         "result": "MAYBE",
-        "evidence": {
-            "review": "uncertain",
-        },
-    }))
+        "evidence": {"review": "uncertain"},
+    })))
 
-    qa = ModelBackedQAAgent(client)
-
-    with pytest.raises(
-        ValueError,
-        match="PASSED or FAILED",
-    ):
+    with pytest.raises(ValueError, match="PASSED or FAILED"):
         qa.review(
-            mission_id="mission-7",
-            change_ref="ref-7",
+            mission_id="mission-10",
+            change_ref="ref-10",
             summary="Candidate",
             changed_files=[],
-            developer_evidence={
-                "tests": "passed",
-            },
+            developer_evidence={"tests": "passed"},
         )
 
 
 def test_qa_rejects_missing_evidence():
-    client = FakeModelClient(json.dumps({
+    qa = ModelBackedQAAgent(FakeModelClient(json.dumps({
         "result": "PASSED",
         "evidence": {},
-    }))
-
-    qa = ModelBackedQAAgent(client)
+    })))
 
     with pytest.raises(ValueError, match="evidence"):
         qa.review(
-            mission_id="mission-8",
-            change_ref="ref-8",
+            mission_id="mission-11",
+            change_ref="ref-11",
             summary="Candidate",
             changed_files=[],
-            developer_evidence={
-                "tests": "passed",
-            },
+            developer_evidence={"tests": "passed"},
         )
 
 
 def test_qa_rejects_non_json_model_output():
-    client = FakeModelClient(
-        "Everything looks good."
-    )
-
-    qa = ModelBackedQAAgent(client)
+    qa = ModelBackedQAAgent(FakeModelClient("Everything looks good."))
 
     with pytest.raises(ValueError, match="JSON"):
         qa.review(
-            mission_id="mission-9",
-            change_ref="ref-9",
+            mission_id="mission-12",
+            change_ref="ref-12",
             summary="Candidate",
             changed_files=[],
-            developer_evidence={
-                "tests": "passed",
-            },
+            developer_evidence={"tests": "passed"},
         )
 
 
@@ -258,7 +224,6 @@ def test_model_agents_do_not_receive_deployment_authority():
     import ai_hq.delivery.model_agents as module
 
     source = inspect.getsource(module)
-
     prohibited = (
         "subprocess.run(",
         "subprocess.Popen(",
