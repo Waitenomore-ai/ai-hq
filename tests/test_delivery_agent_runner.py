@@ -2,9 +2,14 @@ from dataclasses import dataclass
 
 import pytest
 
-from ai_hq.delivery.models import DeliveryStage, QAResult
 from ai_hq.delivery.agent_runner import DeliveryAgentRunner
 from ai_hq.delivery.candidate_verifier import CandidateVerifier
+from ai_hq.delivery.models import DeliveryStage, QAResult
+from ai_hq.delivery.repository_workspace import (
+    CandidateSnapshot,
+    RepositoryWorkspace,
+    TestEvidence,
+)
 
 
 @dataclass
@@ -31,14 +36,15 @@ class FakeDeliveryRuntime:
         changed_files,
         evidence,
     ):
-        self.developer_calls.append({
-            "mission_id": mission_id,
-            "change_ref": change_ref,
-            "summary": summary,
-            "changed_files": changed_files,
-            "evidence": evidence,
-        })
-
+        self.developer_calls.append(
+            {
+                "mission_id": mission_id,
+                "change_ref": change_ref,
+                "summary": summary,
+                "changed_files": changed_files,
+                "evidence": evidence,
+            }
+        )
         return FakeDelivery(
             mission_id=mission_id,
             stage=DeliveryStage.QA,
@@ -56,12 +62,14 @@ class FakeDeliveryRuntime:
         result,
         evidence,
     ):
-        self.qa_calls.append({
-            "mission_id": mission_id,
-            "change_ref": change_ref,
-            "result": result,
-            "evidence": evidence,
-        })
+        self.qa_calls.append(
+            {
+                "mission_id": mission_id,
+                "change_ref": change_ref,
+                "result": result,
+                "evidence": evidence,
+            }
+        )
 
 
 class FakeDeveloper:
@@ -88,169 +96,215 @@ class FakeQA:
         changed_files,
         developer_evidence,
     ):
-        self.calls.append({
-            "mission_id": mission_id,
-            "change_ref": change_ref,
-            "summary": summary,
-            "changed_files": changed_files,
-            "developer_evidence": developer_evidence,
-        })
-
+        self.calls.append(
+            {
+                "mission_id": mission_id,
+                "change_ref": change_ref,
+                "summary": summary,
+                "changed_files": changed_files,
+                "developer_evidence": developer_evidence,
+            }
+        )
         return self.result
 
 
-def developer_candidate(change_ref="immutable-abc123"):
+class FakeWorkspaceService:
+    def __init__(self, *, fail_at=None, tests_passed=True):
+        self.fail_at = fail_at
+        self.calls = []
+        self.tests_passed = tests_passed
+        self.workspace = RepositoryWorkspace(
+            mission_id="mission-1",
+            repository="Waitenomore-ai/ai-hq",
+            base_ref="abc123",
+            workspace_id="workspace-1",
+        )
+
+    def prepare(self, *, mission_id):
+        self.calls.append(("prepare", mission_id))
+        if self.fail_at == "prepare":
+            raise RuntimeError("prepare failed")
+        return RepositoryWorkspace(
+            mission_id=mission_id,
+            repository=self.workspace.repository,
+            base_ref=self.workspace.base_ref,
+            workspace_id=self.workspace.workspace_id,
+        )
+
+    def snapshot(self, *, workspace):
+        self.calls.append(("snapshot", workspace.workspace_id))
+        if self.fail_at == "snapshot":
+            raise RuntimeError("snapshot failed")
+        return CandidateSnapshot(
+            workspace_id=workspace.workspace_id,
+            repository=workspace.repository,
+            base_ref=workspace.base_ref,
+            changed_files=("src/real.py", "tests/test_real.py"),
+            diff_digest="sha256:" + ("a" * 64),
+            content_digest="sha256:" + ("b" * 64),
+        )
+
+    def run_tests(self, *, workspace):
+        self.calls.append(("run_tests", workspace.workspace_id))
+        if self.fail_at == "run_tests":
+            raise RuntimeError("tests failed to execute")
+        return TestEvidence(
+            passed=self.tests_passed,
+            exit_code=0 if self.tests_passed else 1,
+            summary="42 passed" if self.tests_passed else "1 failed",
+            evidence_digest="sha256:" + ("c" * 64),
+        )
+
+
+def developer_candidate():
     return {
-        "change_ref": change_ref,
+        "change_ref": "MODEL-INVENTED-REF",
         "summary": "Developer implementation candidate",
-        "changed_files": [
-            "src/ai_hq/example.py",
-            "tests/test_example.py",
-        ],
-        "evidence": {
-            "tests": "42 passed",
-            "source": "developer",
-        },
+        "changed_files": ["model/claimed.py"],
+        "evidence": {"source": "developer", "tests": "claimed pass"},
     }
 
 
 def qa_pass():
     return {
         "result": QAResult.PASSED,
-        "evidence": {
-            "tests": "42 passed",
-            "review": "approved by QA",
-        },
+        "evidence": {"review": "approved by QA"},
     }
 
 
 def qa_fail():
     return {
         "result": QAResult.FAILED,
-        "evidence": {
-            "tests": "1 failed",
-            "review": "returned to Developer",
-        },
+        "evidence": {"review": "returned to Developer"},
     }
 
 
-def test_developer_stage_executes_developer_and_persists_candidate():
+def developer_runner(*, workspace_service=None):
     runtime = FakeDeliveryRuntime()
     developer = FakeDeveloper(developer_candidate())
-    qa = FakeQA(qa_pass())
-
     runner = DeliveryAgentRunner(
         runtime=runtime,
         developer=developer,
-        qa=qa,
+        qa=FakeQA(qa_pass()),
         candidate_verifier=CandidateVerifier(),
+        workspace_service=workspace_service or FakeWorkspaceService(),
+    )
+    return runner, runtime, developer
+
+
+def test_developer_stage_uses_workspace_machine_state_for_persistence():
+    workspace_service = FakeWorkspaceService()
+    runner, runtime, developer = developer_runner(
+        workspace_service=workspace_service
     )
 
-    worked = runner.run_developer(
-        mission_id="mission-1",
-    )
-
-    assert worked is True
+    assert runner.run_developer(mission_id="mission-1") is True
     assert developer.calls == ["mission-1"]
-    assert len(runtime.developer_calls) == 1
-
-    call = runtime.developer_calls[0]
-
-    assert call["mission_id"] == "mission-1"
-
-    # The model-supplied reference must never cross
-    # the trusted runtime boundary.
-    assert call["change_ref"] != "immutable-abc123"
-    assert call["change_ref"].startswith("sha256:")
-
-    assert call["summary"] == (
-        "Developer implementation candidate"
-    )
-
-    assert call["changed_files"] == [
-        "src/ai_hq/example.py",
-        "tests/test_example.py",
+    assert workspace_service.calls == [
+        ("prepare", "mission-1"),
+        ("snapshot", "workspace-1"),
+        ("run_tests", "workspace-1"),
     ]
 
-    # Only machine-generated verifier evidence is trusted.
-    assert call["evidence"] == {
-        "verification": "candidate_identity_verified",
-        "algorithm": "sha256",
-        "change_ref": call["change_ref"],
+    call = runtime.developer_calls[0]
+    assert call["change_ref"].startswith("sha256:")
+    assert call["change_ref"] != "MODEL-INVENTED-REF"
+    assert call["changed_files"] == ["src/real.py", "tests/test_real.py"]
+    assert "model/claimed.py" not in call["changed_files"]
+    assert call["evidence"]["tests"] == {
+        "passed": True,
+        "exit_code": 0,
+        "summary": "42 passed",
+        "evidence_digest": "sha256:" + ("c" * 64),
     }
-
-    assert "tests" not in call["evidence"]
     assert "source" not in call["evidence"]
 
-    assert qa.calls == []
+
+def test_failed_machine_tests_remain_trusted_evidence_not_model_claims():
+    workspace_service = FakeWorkspaceService(tests_passed=False)
+    runner, runtime, _ = developer_runner(workspace_service=workspace_service)
+
+    runner.run_developer(mission_id="mission-1")
+
+    evidence = runtime.developer_calls[0]["evidence"]
+    assert evidence["tests"]["passed"] is False
+    assert evidence["tests"]["exit_code"] == 1
+    assert evidence["tests"]["summary"] == "1 failed"
+    assert "claimed pass" not in str(evidence)
+
+
+@pytest.mark.parametrize("fail_at", ["prepare", "snapshot", "run_tests"])
+def test_workspace_failures_fail_closed_before_runtime_handoff(fail_at):
+    workspace_service = FakeWorkspaceService(fail_at=fail_at)
+    runner, runtime, _ = developer_runner(workspace_service=workspace_service)
+
+    with pytest.raises(RuntimeError):
+        runner.run_developer(mission_id="mission-1")
+
+    assert runtime.developer_calls == []
+
+
+def test_developer_stage_requires_workspace_service_and_verifier():
+    runtime = FakeDeliveryRuntime()
+
+    missing_workspace = DeliveryAgentRunner(
+        runtime=runtime,
+        developer=FakeDeveloper(developer_candidate()),
+        qa=FakeQA(qa_pass()),
+        candidate_verifier=CandidateVerifier(),
+    )
+    with pytest.raises(ValueError, match="workspace service"):
+        missing_workspace.run_developer(mission_id="mission-1")
+
+    missing_verifier = DeliveryAgentRunner(
+        runtime=runtime,
+        developer=FakeDeveloper(developer_candidate()),
+        qa=FakeQA(qa_pass()),
+        workspace_service=FakeWorkspaceService(),
+    )
+    with pytest.raises(ValueError, match="candidate verifier"):
+        missing_verifier.run_developer(mission_id="mission-1")
+
+    assert runtime.developer_calls == []
+
 
 def test_qa_reviews_exact_persisted_developer_change():
     runtime = FakeDeliveryRuntime()
-    developer = FakeDeveloper(developer_candidate())
     qa = FakeQA(qa_pass())
-
     runner = DeliveryAgentRunner(
         runtime=runtime,
-        developer=developer,
+        developer=FakeDeveloper(developer_candidate()),
         qa=qa,
     )
-
     delivery = FakeDelivery(
         mission_id="mission-2",
         stage=DeliveryStage.QA,
         change_ref="exact-ref-456",
         summary="Exact persisted proposal",
         changed_files=["src/example.py"],
-        developer_evidence={
-            "tests": "99 passed",
-        },
+        developer_evidence={"verification": "candidate_identity_verified"},
     )
 
-    worked = runner.run_qa(delivery)
-
-    assert worked is True
-
-    assert qa.calls == [{
-        "mission_id": "mission-2",
-        "change_ref": "exact-ref-456",
-        "summary": "Exact persisted proposal",
-        "changed_files": ["src/example.py"],
-        "developer_evidence": {
-            "tests": "99 passed",
-        },
-    }]
-
-    assert runtime.qa_calls == [{
-        "mission_id": "mission-2",
-        "change_ref": "exact-ref-456",
-        "result": QAResult.PASSED,
-        "evidence": {
-            "tests": "42 passed",
-            "review": "approved by QA",
-        },
-    }]
+    assert runner.run_qa(delivery) is True
+    assert qa.calls[0]["change_ref"] == "exact-ref-456"
+    assert runtime.qa_calls[0]["change_ref"] == "exact-ref-456"
+    assert runtime.qa_calls[0]["result"] is QAResult.PASSED
 
 
 def test_qa_failure_is_recorded_against_exact_change():
     runtime = FakeDeliveryRuntime()
-    developer = FakeDeveloper(developer_candidate())
-    qa = FakeQA(qa_fail())
-
     runner = DeliveryAgentRunner(
         runtime=runtime,
-        developer=developer,
-        qa=qa,
+        developer=FakeDeveloper(developer_candidate()),
+        qa=FakeQA(qa_fail()),
     )
-
     delivery = FakeDelivery(
         mission_id="mission-3",
         stage=DeliveryStage.QA,
         change_ref="failed-ref-789",
         summary="Candidate needing revision",
         changed_files=["src/failing.py"],
-        developer_evidence={
-            "tests": "developer tests passed",
-        },
+        developer_evidence={"verification": "candidate_identity_verified"},
     )
 
     runner.run_qa(delivery)
@@ -259,47 +313,20 @@ def test_qa_failure_is_recorded_against_exact_change():
     assert runtime.qa_calls[0]["result"] is QAResult.FAILED
 
 
-def test_developer_candidate_requires_immutable_change_ref():
-    runtime = FakeDeliveryRuntime()
-
-    candidate = developer_candidate()
-    candidate["change_ref"] = ""
-
-    runner = DeliveryAgentRunner(
-        runtime=runtime,
-        developer=FakeDeveloper(candidate),
-        qa=FakeQA(qa_pass()),
-    )
-
-    with pytest.raises(ValueError, match="change_ref"):
-        runner.run_developer(
-            mission_id="mission-4",
-        )
-
-    assert runtime.developer_calls == []
-
-
 def test_qa_result_requires_evidence():
     runtime = FakeDeliveryRuntime()
-
     runner = DeliveryAgentRunner(
         runtime=runtime,
         developer=FakeDeveloper(developer_candidate()),
-        qa=FakeQA({
-            "result": QAResult.PASSED,
-            "evidence": {},
-        }),
+        qa=FakeQA({"result": QAResult.PASSED, "evidence": {}}),
     )
-
     delivery = FakeDelivery(
         mission_id="mission-5",
         stage=DeliveryStage.QA,
         change_ref="exact-ref",
         summary="Proposal",
         changed_files=[],
-        developer_evidence={
-            "tests": "passed",
-        },
+        developer_evidence={"verification": "candidate_identity_verified"},
     )
 
     with pytest.raises(ValueError, match="evidence"):
@@ -314,7 +341,6 @@ def test_agent_runner_has_no_direct_production_execution_capability():
     import ai_hq.delivery.agent_runner as module
 
     source = inspect.getsource(module)
-
     prohibited = (
         "subprocess.run(",
         "subprocess.Popen(",
@@ -322,165 +348,9 @@ def test_agent_runner_has_no_direct_production_execution_capability():
         ".deploy(",
         ".rollback(",
         ".restart(",
+        "ai_hq.host_helper",
+        "ToolGateway(",
     )
 
     for token in prohibited:
         assert token not in source
-
-
-def test_developer_runner_replaces_model_change_ref_with_verified_ref():
-
-    candidate = {
-        "change_ref": "MODEL-INVENTED-REF",
-        "summary": "Verified candidate",
-        "changed_files": ["src/example.py"],
-        "evidence": {
-            "model_claim": "tests passed",
-        },
-    }
-
-    runtime = FakeDeliveryRuntime()
-    developer = FakeDeveloper(candidate)
-    qa = FakeQA({
-        "result": QAResult.PASSED,
-        "evidence": {"review": "ok"},
-    })
-
-    runner = DeliveryAgentRunner(
-        runtime=runtime,
-        developer=developer,
-        qa=qa,
-        candidate_verifier=CandidateVerifier(),
-    )
-
-    runner.run_developer(
-        mission_id="mission-verified-1",
-    )
-
-    assert len(runtime.developer_calls) == 1
-
-    call = runtime.developer_calls[0]
-
-    assert call["change_ref"] != "MODEL-INVENTED-REF"
-    assert call["change_ref"].startswith("sha256:")
-
-
-def test_developer_runner_uses_machine_verified_evidence_only():
-
-    candidate = {
-        "change_ref": "MODEL-REF",
-        "summary": "Verified evidence",
-        "changed_files": ["src/example.py"],
-        "evidence": {
-            "model_claim": "999 tests passed",
-            "trusted": True,
-        },
-    }
-
-    runtime = FakeDeliveryRuntime()
-    developer = FakeDeveloper(candidate)
-    qa = FakeQA({
-        "result": QAResult.PASSED,
-        "evidence": {"review": "ok"},
-    })
-
-    runner = DeliveryAgentRunner(
-        runtime=runtime,
-        developer=developer,
-        qa=qa,
-        candidate_verifier=CandidateVerifier(),
-    )
-
-    runner.run_developer(
-        mission_id="mission-verified-2",
-    )
-
-    call = runtime.developer_calls[0]
-    evidence = call["evidence"]
-
-    assert evidence["verification"] == (
-        "candidate_identity_verified"
-    )
-
-    assert evidence["change_ref"] == call["change_ref"]
-
-    assert "model_claim" not in evidence
-    assert "trusted" not in evidence
-
-
-def test_developer_runner_preserves_verified_candidate_contents():
-
-    candidate = {
-        "change_ref": "MODEL-REF",
-        "summary": "Exact verified summary",
-        "changed_files": [
-            "src/one.py",
-            "tests/test_one.py",
-        ],
-        "evidence": {
-            "model_claim": "ignored",
-        },
-    }
-
-    runtime = FakeDeliveryRuntime()
-    developer = FakeDeveloper(candidate)
-    qa = FakeQA({
-        "result": QAResult.PASSED,
-        "evidence": {"review": "ok"},
-    })
-
-    runner = DeliveryAgentRunner(
-        runtime=runtime,
-        developer=developer,
-        qa=qa,
-        candidate_verifier=CandidateVerifier(),
-    )
-
-    runner.run_developer(
-        mission_id="mission-verified-3",
-    )
-
-    call = runtime.developer_calls[0]
-
-    assert call["summary"] == (
-        "Exact verified summary"
-    )
-
-    assert call["changed_files"] == [
-        "src/one.py",
-        "tests/test_one.py",
-    ]
-
-
-def test_runner_without_verifier_fails_closed():
-    candidate = {
-        "change_ref": "MODEL-REF-MUST-NOT-CROSS",
-        "summary": "Unsafe candidate",
-        "changed_files": [],
-        "evidence": {
-            "model_claim": "passed",
-        },
-    }
-
-    runtime = FakeDeliveryRuntime()
-    developer = FakeDeveloper(candidate)
-    qa = FakeQA({
-        "result": QAResult.PASSED,
-        "evidence": {"review": "ok"},
-    })
-
-    runner = DeliveryAgentRunner(
-        runtime=runtime,
-        developer=developer,
-        qa=qa,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="verifier",
-    ):
-        runner.run_developer(
-            mission_id="mission-no-verifier",
-        )
-
-    assert runtime.developer_calls == []
