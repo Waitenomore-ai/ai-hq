@@ -8,7 +8,9 @@ from ai_hq.delivery.models import DeliveryStage, QAResult
 from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
     RepositoryWorkspace,
-    TestEvidence,
+)
+from ai_hq.delivery.repository_workspace import (
+    TestEvidence as WorkspaceTestEvidence,
 )
 
 
@@ -148,7 +150,7 @@ class FakeWorkspaceService:
         self.calls.append(("run_tests", workspace.workspace_id))
         if self.fail_at == "run_tests":
             raise RuntimeError("tests failed to execute")
-        return TestEvidence(
+        return WorkspaceTestEvidence(
             passed=self.tests_passed,
             exit_code=0 if self.tests_passed else 1,
             summary="42 passed" if self.tests_passed else "1 failed",
