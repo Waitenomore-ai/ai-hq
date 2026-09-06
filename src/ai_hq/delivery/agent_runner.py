@@ -4,7 +4,10 @@ from typing import Any, Protocol
 
 from ai_hq.delivery.candidate_verifier import CandidateVerifier
 from ai_hq.delivery.models import Delivery, QAResult
-from ai_hq.delivery.repository_workspace import RepositoryWorkspaceService
+from ai_hq.delivery.repository_workspace import (
+    RepositoryWorkspace,
+    RepositoryWorkspaceService,
+)
 from ai_hq.delivery.runtime import DeliveryRuntime
 
 
@@ -68,21 +71,53 @@ class DeliveryAgentRunner:
         *,
         mission_id: str,
     ) -> bool:
+        workspace = self._prepare_workspace(mission_id=mission_id)
+        candidate = self.developer.execute(mission_id=mission_id)
+        self._verify_and_persist(
+            mission_id=mission_id,
+            candidate=candidate,
+            workspace=workspace,
+        )
+        return True
+
+    def persist_candidate(
+        self,
+        *,
+        mission_id: str,
+        candidate: dict[str, Any],
+    ) -> bool:
+        """Verify an externally produced candidate through the same boundary."""
+        workspace = self._prepare_workspace(mission_id=mission_id)
+        self._verify_and_persist(
+            mission_id=mission_id,
+            candidate=candidate,
+            workspace=workspace,
+        )
+        return True
+
+    def _prepare_workspace(self, *, mission_id: str) -> RepositoryWorkspace:
         if self.workspace_service is None:
             raise ValueError("repository workspace service is required")
-
         if self.candidate_verifier is None:
             raise ValueError("candidate verifier is required")
+        return self.workspace_service.prepare(mission_id=mission_id)
 
-        workspace = self.workspace_service.prepare(mission_id=mission_id)
-
-        candidate = self.developer.execute(mission_id=mission_id)
+    def _verify_and_persist(
+        self,
+        *,
+        mission_id: str,
+        candidate: dict[str, Any],
+        workspace: RepositoryWorkspace,
+    ) -> None:
         if not isinstance(candidate, dict):
             raise ValueError("developer candidate must be a mapping")
 
         summary = candidate.get("summary")
         if not isinstance(summary, str) or not summary.strip():
             raise ValueError("developer candidate requires summary")
+
+        if self.workspace_service is None or self.candidate_verifier is None:
+            raise ValueError("verified candidate dependencies are required")
 
         snapshot = self.workspace_service.snapshot(workspace=workspace)
         test_evidence = self.workspace_service.run_tests(workspace=workspace)
@@ -101,8 +136,6 @@ class DeliveryAgentRunner:
             changed_files=list(verified.changed_files),
             evidence=dict(verified.evidence),
         )
-
-        return True
 
     def run_qa(
         self,
