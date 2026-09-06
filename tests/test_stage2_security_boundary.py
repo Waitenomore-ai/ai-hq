@@ -1,15 +1,11 @@
 import pytest
 
 from ai_hq.host_helper.contracts import (
-    HelperRequest,
     HostAllowLists,
     HostCapability,
     validate_request,
 )
-from ai_hq.tool_gateway.contracts import (
-    ToolOutcomeState,
-    ToolRequest,
-)
+from ai_hq.tool_gateway.contracts import ToolRequest
 
 
 def _request(capability, target, params=None):
