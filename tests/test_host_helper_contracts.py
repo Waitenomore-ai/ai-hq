@@ -16,6 +16,7 @@ def test_host_capabilities_are_exactly_the_controlled_set():
     assert {capability.value for capability in HostCapability} == {
         "host.health",
         "host.resources",
+        "dripvid.readiness",
         "service.status",
         "service.restart",
         "service.recover",
@@ -60,6 +61,30 @@ def test_host_capabilities_reject_caller_controlled_fields(
         {"capability": capability, "target": "nginx", "params": {}},
         {"capability": capability, "params": {"path": "/etc/passwd"}},
         {"capability": capability, "params": {"command": "id"}},
+    ):
+        with pytest.raises(ValueError):
+            validate_request(payload, allow_lists)
+
+
+def test_dripvid_readiness_accepts_no_target_or_params(allow_lists: HostAllowLists):
+    request = validate_request(
+        {"capability": "dripvid.readiness", "target": None, "params": {}},
+        allow_lists,
+    )
+
+    assert request.capability is HostCapability.DRIPVID_READINESS
+    assert request.target is None
+    assert request.params == {}
+
+
+def test_dripvid_readiness_rejects_arbitrary_input(allow_lists: HostAllowLists):
+    for payload in (
+        {"capability": "dripvid.readiness", "target": "dripvid", "params": {}},
+        {
+            "capability": "dripvid.readiness",
+            "target": None,
+            "params": {"url": "http://example.com"},
+        },
     ):
         with pytest.raises(ValueError):
             validate_request(payload, allow_lists)
