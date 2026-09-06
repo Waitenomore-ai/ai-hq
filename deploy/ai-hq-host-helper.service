@@ -11,6 +11,7 @@ SupplementaryGroups=docker systemd-journal
 EnvironmentFile=/etc/ai-hq/host-helper.env
 RuntimeDirectory=ai-hq
 RuntimeDirectoryMode=0770
+RuntimeDirectoryPreserve=yes
 ExecStart=/opt/ai-hq/host-helper-venv/bin/python -m ai_hq.host_helper.server
 Restart=on-failure
 RestartSec=2
