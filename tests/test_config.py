@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -53,3 +55,40 @@ def test_production_accepts_separate_admin_auth_secrets():
     )
     assert settings.is_production is True
     assert settings.root_path == "/ai-hq"
+
+
+def test_repository_sandbox_paths_are_resolved(tmp_path):
+    source = tmp_path / "source"
+    sandbox = tmp_path / "sandbox"
+
+    settings = Settings(
+        database_url="postgresql+psycopg://u:p@db/hq",
+        redis_url="redis://redis:6379/0",
+        ai_hq_repository_source=str(source),
+        repository_sandbox_root=str(sandbox),
+    )
+
+    assert settings.ai_hq_repository_source_path == Path(source).resolve()
+    assert settings.repository_sandbox_root_path == Path(sandbox).resolve()
+
+
+@pytest.mark.parametrize(
+    ("source_name", "sandbox_name"),
+    [
+        ("repo", "repo"),
+        ("repo", "repo/sandbox"),
+        ("sandbox/repo", "sandbox"),
+    ],
+)
+def test_repository_sandbox_rejects_overlapping_paths(
+    tmp_path,
+    source_name,
+    sandbox_name,
+):
+    with pytest.raises(ValidationError, match="sandbox"):
+        Settings(
+            database_url="postgresql+psycopg://u:p@db/hq",
+            redis_url="redis://redis:6379/0",
+            ai_hq_repository_source=str(tmp_path / source_name),
+            repository_sandbox_root=str(tmp_path / sandbox_name),
+        )
