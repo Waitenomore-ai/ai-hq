@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+import httpx
+
 from ai_hq.host_helper.contracts import (
     HelperRequest,
     HelperResponse,
@@ -15,6 +17,35 @@ from ai_hq.host_helper.contracts import (
 COMMAND_TIMEOUT_SECONDS = 8.0
 MAX_LOG_LINES = 200
 MAX_RESPONSE_BYTES = 64 * 1024
+DRIPVID_READINESS_URL = "http://127.0.0.1:3000/health/ready"
+DRIPVID_READINESS_TIMEOUT_SECONDS = 3.0
+
+_READINESS_BOOLEAN_FIELDS = (
+    "database",
+    "jellyfin",
+    "radarr",
+    "sonarr",
+    "qbittorrent",
+    "requestSync",
+)
+_STORAGE_BOOLEAN_FIELDS = (
+    "available",
+    "writable",
+    "belowReserve",
+)
+_STORAGE_INTEGER_FIELDS = (
+    "freeBytes",
+    "reserveBytes",
+)
+_ALLOWED_READINESS_ERRORS = frozenset(
+    {
+        "timeout",
+        "connection_error",
+        "transport_error",
+        "response_too_large",
+        "invalid_json",
+    }
+)
 
 SERVICE_UNITS = {
     "ai-hq": "ai-hq-host-helper.service",
@@ -72,6 +103,7 @@ class CompletedCommand:
 
 
 CommandRunner = Callable[[list[str], float], CompletedCommand]
+ReadinessRunner = Callable[[str, float, int], dict[str, object]]
 
 
 def default_command_runner(argv: list[str], timeout: float) -> CompletedCommand:
@@ -84,6 +116,118 @@ def default_command_runner(argv: list[str], timeout: float) -> CompletedCommand:
         check=False,
     )
     return CompletedCommand(completed.returncode, completed.stdout, completed.stderr)
+
+
+def _bounded_readiness_error(
+    *,
+    reachable: bool,
+    status_code: int | None,
+    error: str,
+) -> dict[str, object]:
+    return {
+        "reachable": reachable,
+        "status_code": status_code,
+        "ok": False,
+        "error": error,
+    }
+
+
+def _normalize_readiness(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        return _bounded_readiness_error(
+            reachable=False,
+            status_code=None,
+            error="transport_error",
+        )
+
+    reachable = payload.get("reachable") is True
+    status_code = payload.get("status_code")
+    if isinstance(status_code, bool) or not isinstance(status_code, int):
+        status_code = None
+
+    result: dict[str, object] = {
+        "reachable": reachable,
+        "status_code": status_code,
+        "ok": payload.get("ok") is True,
+    }
+
+    for field in _READINESS_BOOLEAN_FIELDS:
+        value = payload.get(field)
+        if isinstance(value, bool):
+            result[field] = value
+
+    storage_value = payload.get("storage")
+    if isinstance(storage_value, dict):
+        storage: dict[str, object] = {}
+        for field in _STORAGE_BOOLEAN_FIELDS:
+            value = storage_value.get(field)
+            if isinstance(value, bool):
+                storage[field] = value
+        for field in _STORAGE_INTEGER_FIELDS:
+            value = storage_value.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                storage[field] = value
+        if storage:
+            result["storage"] = storage
+
+    error = payload.get("error")
+    result["error"] = error if error in _ALLOWED_READINESS_ERRORS else None
+    return result
+
+
+def default_readiness_runner(url: str, timeout: float, limit: int) -> dict[str, object]:
+    try:
+        with httpx.stream("GET", url, timeout=timeout) as response:
+            body = bytearray()
+            for chunk in response.iter_bytes():
+                body.extend(chunk)
+                if len(body) > limit:
+                    return _bounded_readiness_error(
+                        reachable=True,
+                        status_code=response.status_code,
+                        error="response_too_large",
+                    )
+    except httpx.TimeoutException:
+        return _bounded_readiness_error(
+            reachable=False,
+            status_code=None,
+            error="timeout",
+        )
+    except httpx.ConnectError:
+        return _bounded_readiness_error(
+            reachable=False,
+            status_code=None,
+            error="connection_error",
+        )
+    except httpx.HTTPError:
+        return _bounded_readiness_error(
+            reachable=False,
+            status_code=None,
+            error="transport_error",
+        )
+
+    try:
+        payload = json.loads(bytes(body))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _bounded_readiness_error(
+            reachable=True,
+            status_code=response.status_code,
+            error="invalid_json",
+        )
+
+    if not isinstance(payload, dict):
+        return _bounded_readiness_error(
+            reachable=True,
+            status_code=response.status_code,
+            error="invalid_json",
+        )
+
+    payload = {
+        **payload,
+        "reachable": True,
+        "status_code": response.status_code,
+    }
+    return _normalize_readiness(payload)
 
 
 def _redact(text: str) -> str:
@@ -113,9 +257,11 @@ class HostExecutor:
         allow_lists: HostAllowLists,
         *,
         command_runner: CommandRunner = default_command_runner,
+        readiness_runner: ReadinessRunner = default_readiness_runner,
     ):
         self.allow_lists = allow_lists
         self.command_runner = command_runner
+        self.readiness_runner = readiness_runner
 
     @staticmethod
     def _failure(request: HelperRequest, error: str) -> HelperResponse:
@@ -142,6 +288,8 @@ class HostExecutor:
             return self._host_health(request)
         if capability is HostCapability.HOST_RESOURCES:
             return self._host_resources(request)
+        if capability is HostCapability.DRIPVID_READINESS:
+            return self._dripvid_readiness(request)
         if capability is HostCapability.SERVICE_STATUS:
             return self._service_status(request)
         if capability is HostCapability.SERVICE_RESTART:
@@ -236,6 +384,42 @@ class HostExecutor:
                     "use_percent": filesystem_values[4],
                 },
             },
+        )
+
+    def _dripvid_readiness(self, request: HelperRequest) -> HelperResponse:
+        if request.target is not None or request.params:
+            return self._failure(request, "invalid parameters")
+
+        try:
+            payload = self.readiness_runner(
+                DRIPVID_READINESS_URL,
+                DRIPVID_READINESS_TIMEOUT_SECONDS,
+                MAX_RESPONSE_BYTES,
+            )
+        except TimeoutError:
+            payload = _bounded_readiness_error(
+                reachable=False,
+                status_code=None,
+                error="timeout",
+            )
+        except OSError:
+            payload = _bounded_readiness_error(
+                reachable=False,
+                status_code=None,
+                error="connection_error",
+            )
+        except Exception:
+            payload = _bounded_readiness_error(
+                reachable=False,
+                status_code=None,
+                error="transport_error",
+            )
+
+        return HelperResponse(
+            True,
+            request.capability,
+            None,
+            _normalize_readiness(payload),
         )
 
     def _service_status(self, request: HelperRequest) -> HelperResponse:
@@ -510,7 +694,6 @@ class HostExecutor:
             target,
             {
                 "text": text,
-                "lines_requested": lines,
                 "truncated": truncated,
             },
         )
