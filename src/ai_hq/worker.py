@@ -81,7 +81,7 @@ def build_autonomous_mission_runner(
     Repository delivery candidates are deliberately fail-closed here until a
     trusted isolated RepositoryWorkspaceService backend is explicitly wired
     into a verified DeliveryAgentRunner. The worker never falls back to a
-    direct DeliveryRuntime handoff for candidate metadata.
+    direct unverified candidate-metadata handoff.
     """
     if session_factory is None:
         session_factory = get_session_factory()
