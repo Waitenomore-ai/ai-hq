@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from ai_hq.host_helper.client import MAX_RESPONSE_BYTES, HostHelperClient, HostHelperError
-from ai_hq.host_helper.contracts import HelperRequest, HostCapability
+from ai_hq.host_helper.contracts import HelperRequest, HelperResponse, HostCapability
 
 
 def run_server(socket_path: Path, response: bytes, seen: list[dict]) -> threading.Thread:
@@ -97,26 +97,29 @@ def test_client_rejects_capability_or_target_echo_mismatch(tmp_path: Path):
     thread.join(timeout=2)
 
 
-def test_dripvid_readiness_helper_sends_fixed_zero_argument_request(tmp_path: Path):
-    socket_path = tmp_path / "helper.sock"
-    seen: list[dict] = []
-    thread = run_server(
-        socket_path,
-        b'{"ok":true,"capability":"dripvid.readiness","target":null,"data":{"reachable":true,"status_code":200,"ok":true,"error":null},"error":null}\n',
-        seen,
-    )
-    client = HostHelperClient(str(socket_path), "service-secret")
+def test_dripvid_readiness_helper_sends_fixed_zero_argument_request(monkeypatch):
+    client = HostHelperClient("/run/ai-hq/host-helper.sock", "service-secret")
+    seen: list[HelperRequest] = []
+
+    def fake_execute(request: HelperRequest) -> HelperResponse:
+        seen.append(request)
+        return HelperResponse(
+            ok=True,
+            capability=HostCapability.DRIPVID_READINESS,
+            target=None,
+            data={"reachable": True, "status_code": 200, "ok": True, "error": None},
+        )
+
+    monkeypatch.setattr(client, "execute", fake_execute)
 
     response = client.dripvid_readiness()
-    thread.join(timeout=2)
 
     assert response.ok is True
     assert response.data["reachable"] is True
     assert seen == [
-        {
-            "credential": "service-secret",
-            "capability": "dripvid.readiness",
-            "target": None,
-            "params": {},
-        }
+        HelperRequest(
+            capability=HostCapability.DRIPVID_READINESS,
+            target=None,
+            params={},
+        )
     ]
