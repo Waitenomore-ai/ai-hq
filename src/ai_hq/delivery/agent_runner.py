@@ -4,14 +4,16 @@ from typing import Any, Protocol
 
 from ai_hq.delivery.candidate_verifier import CandidateVerifier
 from ai_hq.delivery.models import Delivery, QAResult
+from ai_hq.delivery.repository_workspace import RepositoryWorkspaceService
 from ai_hq.delivery.runtime import DeliveryRuntime
 
 
 class DeveloperAgent(Protocol):
     """
-    Safe Developer execution boundary.
+    Safe Developer reasoning boundary.
 
-    Implementations produce an immutable candidate plus evidence.
+    Implementations may describe intended repository work, but trusted
+    candidate identity and evidence are obtained from the workspace service.
     This interface grants no deployment or production authority.
     """
 
@@ -24,11 +26,7 @@ class DeveloperAgent(Protocol):
 
 
 class QAAgent(Protocol):
-    """
-    Safe QA review boundary.
-
-    QA receives the exact persisted Developer proposal.
-    """
+    """Safe QA review boundary for the exact persisted candidate."""
 
     def review(
         self,
@@ -44,10 +42,10 @@ class QAAgent(Protocol):
 
 class DeliveryAgentRunner:
     """
-    Coordinates Developer -> persisted candidate -> QA.
+    Coordinates Developer -> workspace evidence -> persisted candidate -> QA.
 
-    This runner does not deploy, invoke host helpers, execute shell
-    commands, restart services, or mutate production.
+    This runner does not deploy, invoke host helpers, execute shell commands,
+    restart services, operate production Docker, or mutate production.
     """
 
     def __init__(
@@ -57,77 +55,51 @@ class DeliveryAgentRunner:
         developer: DeveloperAgent,
         qa: QAAgent,
         candidate_verifier: CandidateVerifier | None = None,
+        workspace_service: RepositoryWorkspaceService | None = None,
     ) -> None:
         self.runtime = runtime
         self.developer = developer
         self.qa = qa
         self.candidate_verifier = candidate_verifier
+        self.workspace_service = workspace_service
 
     def run_developer(
         self,
         *,
         mission_id: str,
     ) -> bool:
-        candidate = self.developer.execute(
-            mission_id=mission_id,
-        )
-
-        if not isinstance(candidate, dict):
-            raise ValueError(
-                "developer candidate must be a mapping"
-            )
-
-        change_ref = candidate.get("change_ref")
-
-        if not isinstance(change_ref, str) or not change_ref.strip():
-            raise ValueError(
-                "developer candidate requires immutable change_ref"
-            )
-
-        summary = candidate.get("summary")
-
-        if not isinstance(summary, str) or not summary.strip():
-            raise ValueError(
-                "developer candidate requires summary"
-            )
-
-        changed_files = candidate.get(
-            "changed_files",
-            [],
-        )
-
-        if not isinstance(changed_files, list):
-            raise ValueError(
-                "developer candidate changed_files must be a list"
-            )
-
-        evidence = candidate.get("evidence")
-
-        if not isinstance(evidence, dict) or not evidence:
-            raise ValueError(
-                "developer candidate requires evidence"
-            )
+        if self.workspace_service is None:
+            raise ValueError("repository workspace service is required")
 
         if self.candidate_verifier is None:
-            raise ValueError(
-                "candidate verifier is required"
-            )
+            raise ValueError("candidate verifier is required")
+
+        workspace = self.workspace_service.prepare(mission_id=mission_id)
+
+        candidate = self.developer.execute(mission_id=mission_id)
+        if not isinstance(candidate, dict):
+            raise ValueError("developer candidate must be a mapping")
+
+        summary = candidate.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError("developer candidate requires summary")
+
+        snapshot = self.workspace_service.snapshot(workspace=workspace)
+        test_evidence = self.workspace_service.run_tests(workspace=workspace)
 
         verified = self.candidate_verifier.verify(
             mission_id=mission_id,
             proposal=candidate,
+            snapshot=snapshot,
+            test_evidence=test_evidence,
         )
 
         self.runtime.handoff_to_developer(
             mission_id=mission_id,
             change_ref=verified.change_ref,
             summary=verified.summary,
-            changed_files=list(
-                verified.changed_files
-            ),
-            evidence=dict(
-                verified.evidence
-            ),
+            changed_files=list(verified.changed_files),
+            evidence=dict(verified.evidence),
         )
 
         return True
@@ -140,34 +112,22 @@ class DeliveryAgentRunner:
             mission_id=delivery.mission_id,
             change_ref=delivery.change_ref,
             summary=delivery.summary,
-            changed_files=list(
-                delivery.changed_files or []
-            ),
-            developer_evidence=dict(
-                delivery.developer_evidence or {}
-            ),
+            changed_files=list(delivery.changed_files or []),
+            developer_evidence=dict(delivery.developer_evidence or {}),
         )
 
         if not isinstance(result, dict):
-            raise ValueError(
-                "QA result must be a mapping"
-            )
+            raise ValueError("QA result must be a mapping")
 
         qa_result = result.get("result")
-
         try:
             qa_result = QAResult(qa_result)
         except (TypeError, ValueError):
-            raise ValueError(
-                "QA result must be PASSED or FAILED"
-            ) from None
+            raise ValueError("QA result must be PASSED or FAILED") from None
 
         evidence = result.get("evidence")
-
         if not isinstance(evidence, dict) or not evidence:
-            raise ValueError(
-                "QA result requires evidence"
-            )
+            raise ValueError("QA result requires evidence")
 
         self.runtime.handoff_to_qa(
             mission_id=delivery.mission_id,
