@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 from ipaddress import ip_address
+from typing import Protocol
 from urllib.parse import urlsplit
 
 import httpx
 
+from ai_hq.host_helper.client import HostHelperError
+from ai_hq.host_helper.contracts import HostCapability
 from ai_hq.operations.targets import OperationalTarget, OperationalTargetRegistry
 
 
@@ -31,6 +34,20 @@ _STORAGE_INTEGER_FIELDS = (
     "freeBytes",
     "reserveBytes",
 )
+
+_HOST_HELPER_READINESS_ERRORS = frozenset(
+    {
+        "timeout",
+        "connection_error",
+        "transport_error",
+        "response_too_large",
+        "invalid_json",
+    }
+)
+
+
+class HostHelperReadinessClient(Protocol):
+    def dripvid_readiness(self): ...
 
 
 def _validate_loopback_http(url: str) -> None:
@@ -99,6 +116,39 @@ def _normalize_payload(payload: dict, status_code: int) -> dict:
         result["storage"] = storage
 
     result["error"] = None
+    return result
+
+
+def _normalize_host_helper_payload(payload: object) -> dict:
+    if not isinstance(payload, dict):
+        return _bounded_error(
+            reachable=False,
+            status_code=None,
+            error="host_helper_unavailable",
+        )
+
+    reachable = payload.get("reachable") is True
+    status_code = payload.get("status_code")
+    if isinstance(status_code, bool) or not isinstance(status_code, int):
+        status_code = None
+
+    result: dict[str, object] = {
+        "reachable": reachable,
+        "status_code": status_code,
+        "ok": payload.get("ok") is True,
+    }
+
+    for field in _READINESS_BOOLEAN_FIELDS:
+        candidate = payload.get(field)
+        if isinstance(candidate, bool):
+            result[field] = candidate
+
+    storage = _normalize_storage(payload.get("storage"))
+    if storage is not None:
+        result["storage"] = storage
+
+    error = payload.get("error")
+    result["error"] = error if error in _HOST_HELPER_READINESS_ERRORS else None
     return result
 
 
@@ -184,6 +234,36 @@ class DripVidReadinessProbe:
         finally:
             if owns_client:
                 client.close()
+
+
+class HostHelperDripVidReadinessProbe:
+    """Recovery probe that consumes only Host Helper's bounded readiness data."""
+
+    def __init__(self, client: HostHelperReadinessClient) -> None:
+        self.client = client
+
+    def probe(self) -> dict:
+        try:
+            response = self.client.dripvid_readiness()
+        except HostHelperError:
+            return _bounded_error(
+                reachable=False,
+                status_code=None,
+                error="host_helper_unavailable",
+            )
+
+        if (
+            response.ok is not True
+            or response.capability is not HostCapability.DRIPVID_READINESS
+            or response.target is not None
+        ):
+            return _bounded_error(
+                reachable=False,
+                status_code=None,
+                error="host_helper_unavailable",
+            )
+
+        return _normalize_host_helper_payload(response.data)
 
 
 def recovery_diagnostic_targets() -> OperationalTargetRegistry:
