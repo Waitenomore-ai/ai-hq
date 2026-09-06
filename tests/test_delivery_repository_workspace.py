@@ -6,7 +6,7 @@ from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
     RepositoryWorkspace,
     RepositoryWorkspaceService,
-    TestEvidence,
+    TestEvidence as WorkspaceTestEvidence,
 )
 
 
@@ -74,7 +74,7 @@ def test_candidate_snapshot_rejects_invalid_digests_and_file_types():
 
 
 def test_test_evidence_is_immutable_bounded_and_validated():
-    evidence = TestEvidence(
+    evidence = WorkspaceTestEvidence(
         passed=True,
         exit_code=0,
         summary="42 passed",
@@ -85,7 +85,7 @@ def test_test_evidence_is_immutable_bounded_and_validated():
         evidence.exit_code = 1
 
     with pytest.raises(ValueError, match="summary"):
-        TestEvidence(
+        WorkspaceTestEvidence(
             passed=False,
             exit_code=1,
             summary="x" * 4001,
