@@ -123,8 +123,6 @@ class DripVidRecoveryCycle:
             try:
                 statuses[component] = self.diagnostics.service_status(component)
             except Exception:
-                # A missing diagnostic is not evidence that a service is down.
-                # Fail closed: do not manufacture a recovery-eligible state.
                 statuses[component] = None
         return statuses
 
@@ -260,7 +258,7 @@ class RecoveryWorkerCoordinator:
         self._last_run: float | None = None
 
     def run_if_due(self, settings: Settings) -> bool:
-        if not settings.recovery_enabled:
+        if not getattr(settings, "recovery_enabled", False):
             return False
         if settings.operating_mode is OperatingMode.FREEZE:
             return False
@@ -289,9 +287,9 @@ def build_recovery_coordinator(
     session_factory=None,
     clock: MonotonicClock = time.monotonic,
 ) -> RecoveryWorkerCoordinator | None:
-    if not settings.recovery_enabled:
+    if not getattr(settings, "recovery_enabled", False):
         return None
-    if not settings.host_helper_credential:
+    if not getattr(settings, "host_helper_credential", None):
         return None
 
     if session_factory is None:
