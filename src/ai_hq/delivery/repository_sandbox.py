@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
@@ -19,6 +21,10 @@ from ai_hq.delivery.repository_workspace import (
     RepositoryWorkspace,
     TestEvidence,
 )
+
+_CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+_MAX_EVIDENCE_SUMMARY = 4000
+_MAX_OUTPUT_PER_STREAM = 1800
 
 
 @dataclass
@@ -38,12 +44,14 @@ class IsolatedRepositorySandbox:
         profile_registry: RepositoryProfileRegistry,
         repository_key: str,
         sandbox_root: Path,
+        command_runner: _CommandRunner | None = None,
     ) -> None:
         self._profile = profile_registry.get(repository_key)
         self._sandbox_root = Path(sandbox_root).expanduser().resolve()
         self._validate_root_isolation()
         self._sandbox_root.mkdir(parents=True, exist_ok=True)
         self._workspaces: dict[str, _WorkspaceState] = {}
+        self._command_runner = command_runner or self._run_profile_command
 
     def prepare(self, *, mission_id: str) -> RepositoryWorkspace:
         if not isinstance(mission_id, str) or not mission_id.strip():
@@ -135,12 +143,84 @@ class IsolatedRepositorySandbox:
         workspace: RepositoryWorkspace,
     ) -> TestEvidence:
         state = self._state_for(workspace)
+        self._require_current_snapshot(state)
+
+        records: list[dict[str, object]] = []
+        summary_parts: list[str] = []
+        final_exit_code = 0
+        passed = True
+
+        for index, command in enumerate(state.profile.test_commands, start=1):
+            try:
+                result = self._command_runner(
+                    command,
+                    cwd=state.path,
+                    timeout_seconds=state.profile.test_timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError("repository test profile timed out") from exc
+
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            bounded_stdout = stdout[:_MAX_OUTPUT_PER_STREAM]
+            bounded_stderr = stderr[:_MAX_OUTPUT_PER_STREAM]
+            records.append(
+                {
+                    "index": index,
+                    "returncode": result.returncode,
+                    "stdout": bounded_stdout,
+                    "stderr": bounded_stderr,
+                }
+            )
+
+            output = "\n".join(
+                part for part in (bounded_stdout, bounded_stderr) if part
+            )
+            summary = f"step {index}: exit {result.returncode}"
+            if output:
+                summary += f"\n{output}"
+            summary_parts.append(summary)
+
+            if result.returncode != 0:
+                passed = False
+                final_exit_code = result.returncode
+                break
+
+        evidence_summary = "\n\n".join(summary_parts).strip()
+        if not evidence_summary:
+            evidence_summary = "repository test profile completed"
+        evidence_summary = evidence_summary[:_MAX_EVIDENCE_SUMMARY]
+
+        return TestEvidence(
+            passed=passed,
+            exit_code=final_exit_code,
+            summary=evidence_summary,
+            evidence_digest=self._canonical_digest(records),
+        )
+
+    def _require_current_snapshot(self, state: _WorkspaceState) -> None:
         if state.snapshot_fingerprint is None:
             raise RuntimeError("repository workspace snapshot is required before tests")
         current_fingerprint = self._canonical_digest(self._manifest(state.path))
         if current_fingerprint != state.snapshot_fingerprint:
             raise RuntimeError("repository workspace snapshot is stale")
-        raise NotImplementedError("trusted repository test execution is not implemented yet")
+
+    @staticmethod
+    def _run_profile_command(
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        timeout_seconds: float,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            list(argv),
+            cwd=cwd,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
 
     def _validate_root_isolation(self) -> None:
         source = self._profile.source_path.resolve()
