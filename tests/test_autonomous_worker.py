@@ -1,7 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
-
 from ai_hq.missions.models import MissionStatus
 from ai_hq.missions.worker import AutonomousMissionRunner
 
@@ -43,11 +41,7 @@ def test_worker_advances_persisted_autonomous_plan():
     )
     executor = FakeExecutor()
 
-    runner = AutonomousMissionRunner(
-        missions=missions,
-        executor=executor,
-    )
-
+    runner = AutonomousMissionRunner(missions=missions, executor=executor)
     result = runner.run_once()
 
     assert result.mission_id == "m1"
@@ -61,10 +55,7 @@ def test_worker_does_not_claim_legacy_unplanned_mission():
     )
     executor = FakeExecutor()
 
-    runner = AutonomousMissionRunner(
-        missions=missions,
-        executor=executor,
-    )
+    runner = AutonomousMissionRunner(missions=missions, executor=executor)
 
     assert runner.run_once() is None
     assert executor.run_calls == []
@@ -85,10 +76,7 @@ def test_worker_skips_terminal_and_waiting_missions():
     )
     executor = FakeExecutor()
 
-    runner = AutonomousMissionRunner(
-        missions=missions,
-        executor=executor,
-    )
+    runner = AutonomousMissionRunner(missions=missions, executor=executor)
 
     assert runner.run_once() is None
     assert executor.run_calls == []
@@ -98,92 +86,65 @@ def test_worker_resume_routes_through_mission_executor():
     missions = FakeMissionService([], {})
     executor = FakeExecutor()
 
-    runner = AutonomousMissionRunner(
-        missions=missions,
-        executor=executor,
-    )
-
+    runner = AutonomousMissionRunner(missions=missions, executor=executor)
     result = runner.resume_approved("m1")
 
     assert result.mission_id == "m1"
     assert executor.resume_calls == ["m1"]
 
 
-class FakeDeliveryRuntime:
+class FakeVerifiedDeliveryRunner:
     def __init__(self):
-        self.handoffs = []
+        self.candidates = []
 
-    def handoff_to_developer(
-        self,
-        *,
-        mission_id,
-        change_ref,
-        summary,
-        changed_files=None,
-        evidence=None,
-    ):
-        self.handoffs.append(
+    def persist_candidate(self, *, mission_id, candidate):
+        self.candidates.append(
             {
                 "mission_id": mission_id,
-                "change_ref": change_ref,
-                "summary": summary,
-                "changed_files": list(changed_files or []),
-                "evidence": dict(evidence or {}),
+                "candidate": dict(candidate),
             }
         )
+        return True
 
 
 class DeliveryCandidateExecutor(FakeExecutor):
     def run_next(self, mission_id):
         self.run_calls.append(mission_id)
-
         return SimpleNamespace(
             mission_id=mission_id,
             delivery_candidate={
-                "change_ref": "abc123immutable",
+                "change_ref": "MODEL-INVENTED-REF",
                 "summary": "Developer implementation candidate",
-                "changed_files": [
-                    "src/ai_hq/example.py",
-                    "tests/test_example.py",
-                ],
-                "evidence": {
-                    "tests": "42 passed",
-                    "source": "developer",
-                },
+                "changed_files": ["model/claimed.py"],
+                "evidence": {"tests": "claimed pass"},
             },
         )
 
 
-def test_autonomous_worker_hands_exact_execution_candidate_to_delivery_runtime():
+def test_autonomous_worker_routes_candidate_through_verified_delivery_runner():
     missions = FakeMissionService(
         [mission("delivery-m1", MissionStatus.QUEUED)],
         {"delivery-m1": [SimpleNamespace(id="s1")]},
     )
     executor = DeliveryCandidateExecutor()
-    delivery = FakeDeliveryRuntime()
+    delivery_runner = FakeVerifiedDeliveryRunner()
 
     runner = AutonomousMissionRunner(
         missions=missions,
         executor=executor,
-        delivery_runtime=delivery,
+        delivery_runner=delivery_runner,
     )
-
     result = runner.run_once()
 
     assert result.mission_id == "delivery-m1"
-
-    assert delivery.handoffs == [
+    assert delivery_runner.candidates == [
         {
             "mission_id": "delivery-m1",
-            "change_ref": "abc123immutable",
-            "summary": "Developer implementation candidate",
-            "changed_files": [
-                "src/ai_hq/example.py",
-                "tests/test_example.py",
-            ],
-            "evidence": {
-                "tests": "42 passed",
-                "source": "developer",
+            "candidate": {
+                "change_ref": "MODEL-INVENTED-REF",
+                "summary": "Developer implementation candidate",
+                "changed_files": ["model/claimed.py"],
+                "evidence": {"tests": "claimed pass"},
             },
         }
     ]
@@ -195,72 +156,25 @@ def test_autonomous_worker_does_not_create_delivery_without_candidate():
         {"ordinary-m1": [SimpleNamespace(id="s1")]},
     )
     executor = FakeExecutor()
-    delivery = FakeDeliveryRuntime()
+    delivery_runner = FakeVerifiedDeliveryRunner()
 
     runner = AutonomousMissionRunner(
         missions=missions,
         executor=executor,
-        delivery_runtime=delivery,
+        delivery_runner=delivery_runner,
     )
-
     result = runner.run_once()
 
     assert result.mission_id == "ordinary-m1"
-    assert delivery.handoffs == []
+    assert delivery_runner.candidates == []
 
 
-def test_autonomous_worker_delivery_bridge_preserves_exact_change_ref():
-    missions = FakeMissionService(
-        [mission("immutable-m1", MissionStatus.QUEUED)],
-        {"immutable-m1": [SimpleNamespace(id="s1")]},
-    )
-    executor = DeliveryCandidateExecutor()
-    delivery = FakeDeliveryRuntime()
+def test_autonomous_worker_has_no_direct_delivery_runtime_handoff():
+    import inspect
 
-    runner = AutonomousMissionRunner(
-        missions=missions,
-        executor=executor,
-        delivery_runtime=delivery,
-    )
+    import ai_hq.missions.worker as module
 
-    runner.run_once()
+    source = inspect.getsource(module)
 
-    assert len(delivery.handoffs) == 1
-    assert (
-        delivery.handoffs[0]["change_ref"]
-        == "abc123immutable"
-    )
-
-
-def test_autonomous_worker_delivery_bridge_fails_closed_on_incomplete_candidate():
-    class IncompleteCandidateExecutor(FakeExecutor):
-        def run_next(self, mission_id):
-            self.run_calls.append(mission_id)
-
-            return SimpleNamespace(
-                mission_id=mission_id,
-                delivery_candidate={
-                    # Deliberately no immutable change_ref.
-                    "summary": "Unsafe incomplete candidate",
-                    "changed_files": ["src/ai_hq/example.py"],
-                    "evidence": {"tests": "passed"},
-                },
-            )
-
-    missions = FakeMissionService(
-        [mission("incomplete-m1", MissionStatus.QUEUED)],
-        {"incomplete-m1": [SimpleNamespace(id="s1")]},
-    )
-    executor = IncompleteCandidateExecutor()
-    delivery = FakeDeliveryRuntime()
-
-    runner = AutonomousMissionRunner(
-        missions=missions,
-        executor=executor,
-        delivery_runtime=delivery,
-    )
-
-    with pytest.raises(ValueError, match="change_ref"):
-        runner.run_once()
-
-    assert delivery.handoffs == []
+    assert "handoff_to_developer" not in source
+    assert "delivery_runtime" not in source
