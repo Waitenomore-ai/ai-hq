@@ -12,6 +12,7 @@ from ai_hq.host_helper.contracts import HelperResponse, HostCapability
 from ai_hq.operations.targets import OperationalTarget
 from ai_hq.operations.transport import HostHelperOperationalTransport
 from ai_hq.recovery.bootstrap import RecoveryWorkerCoordinator, build_recovery_coordinator
+from ai_hq.recovery.probe import HostHelperDripVidReadinessProbe
 
 
 def isolated_session_factory():
@@ -81,6 +82,21 @@ def test_missing_host_helper_credential_fails_closed():
         settings,
         session_factory=isolated_session_factory(),
     ) is None
+
+
+def test_recovery_coordinator_uses_host_helper_for_readiness():
+    settings = FakeSettings()
+    settings.recovery_dripvid_ready_url = "http://127.0.0.1:3999/unused"
+
+    coordinator = build_recovery_coordinator(
+        settings,
+        session_factory=isolated_session_factory(),
+    )
+
+    assert coordinator is not None
+    assert isinstance(coordinator.cycle.probe, HostHelperDripVidReadinessProbe)
+    assert coordinator.cycle.probe.client.socket_path == settings.host_helper_socket
+    assert coordinator.cycle.probe.client.credential == settings.host_helper_credential
 
 
 def test_observe_only_mode_is_forwarded_to_cycle_without_mutating_scheduler():
