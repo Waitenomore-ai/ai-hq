@@ -30,7 +30,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - /run/ai-hq/host-helper.sock:/run/ai-hq/host-helper.sock
+      - /run/ai-hq:/run/ai-hq:ro
     networks: [ai_hq]
     restart: unless-stopped
 
