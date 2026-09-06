@@ -95,3 +95,28 @@ def test_client_rejects_capability_or_target_echo_mismatch(tmp_path: Path):
     with pytest.raises(HostHelperError, match="response_mismatch"):
         client.execute(HelperRequest(HostCapability.HOST_HEALTH, None, {}))
     thread.join(timeout=2)
+
+
+def test_dripvid_readiness_helper_sends_fixed_zero_argument_request(tmp_path: Path):
+    socket_path = tmp_path / "helper.sock"
+    seen: list[dict] = []
+    thread = run_server(
+        socket_path,
+        b'{"ok":true,"capability":"dripvid.readiness","target":null,"data":{"reachable":true,"status_code":200,"ok":true,"error":null},"error":null}\n',
+        seen,
+    )
+    client = HostHelperClient(str(socket_path), "service-secret")
+
+    response = client.dripvid_readiness()
+    thread.join(timeout=2)
+
+    assert response.ok is True
+    assert response.data["reachable"] is True
+    assert seen == [
+        {
+            "credential": "service-secret",
+            "capability": "dripvid.readiness",
+            "target": None,
+            "params": {},
+        }
+    ]
