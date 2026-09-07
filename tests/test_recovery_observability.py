@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 import pytest
 
@@ -62,6 +63,18 @@ class FailingCycle:
 
     def handle_execution_result(self, result):
         return None
+
+
+class Recorder:
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+
+    def record_successful_cycle(self, **kwargs):
+        self.successes.append(kwargs)
+
+    def record_cycle_error(self, **kwargs):
+        self.errors.append(kwargs)
 
 
 def test_healthy_cycle_exposes_only_bounded_observability_summary():
@@ -134,6 +147,70 @@ def test_unhealthy_cycle_heartbeat_reports_that_recovery_work_was_detected(caplo
     assert "ready=false" in caplog.text
     assert "incident_detected=true" in caplog.text
     assert "worked=true" in caplog.text
+
+
+def test_due_cycle_persists_bounded_summary_once():
+    summary = {
+        "reachable": True,
+        "status_code": 200,
+        "ready": True,
+        "incident_detected": False,
+        "incident_resolved": False,
+        "worked": False,
+    }
+    recorder = Recorder()
+    coordinator = RecoveryWorkerCoordinator(
+        SummaryCycle(summary),
+        clock=lambda: 1000.0,
+        status_recorder=recorder,
+    )
+
+    assert coordinator.run_if_due(Settings()) is False
+
+    assert len(recorder.successes) == 1
+    assert recorder.errors == []
+    recorded = recorder.successes[0]
+    assert recorded["target"] == "dripvid"
+    assert recorded["summary"] == summary
+    assert isinstance(recorded["observed_at"], datetime)
+
+
+def test_cycle_inside_interval_does_not_manufacture_new_probe_status():
+    values = iter((1000.0, 1010.0))
+    recorder = Recorder()
+    coordinator = RecoveryWorkerCoordinator(
+        SummaryCycle({"ready": True}),
+        clock=lambda: next(values),
+        status_recorder=recorder,
+    )
+
+    assert coordinator.run_if_due(Settings()) is False
+    assert coordinator.run_if_due(Settings()) is False
+
+    assert len(recorder.successes) == 1
+
+
+def test_cycle_failure_records_error_and_preserves_original_exception(caplog):
+    recorder = Recorder()
+    coordinator = RecoveryWorkerCoordinator(
+        FailingCycle(),
+        clock=lambda: 1000.0,
+        status_recorder=recorder,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="ai_hq.recovery"):
+        with pytest.raises(RuntimeError, match="probe failed"):
+            coordinator.run_if_due(Settings())
+
+    assert recorder.successes == []
+    assert len(recorder.errors) == 1
+    recorded = recorder.errors[0]
+    assert set(recorded) == {"target", "observed_at"}
+    assert recorded["target"] == "dripvid"
+    assert isinstance(recorded["observed_at"], datetime)
+    assert "recovery_cycle_failed" in caplog.text
+    assert "must-not-be-logged" not in caplog.text
+    assert "token" not in caplog.text
 
 
 def test_cycle_failure_is_logged_without_leaking_exception_text(caplog):
