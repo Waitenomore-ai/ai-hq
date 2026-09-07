@@ -55,14 +55,27 @@ def build_candidate(tmp_path: Path):
     (workspace / ".git" / "ignored").write_text("ignored\n")
 
     content_digest = digest(manifest(workspace))
-    change_ref = "sha256:" + "a" * 64
+    diff_digest = "sha256:" + "c" * 64
+    identity = {
+        "mission_id": "mission-1",
+        "repository": "ai-hq",
+        "base_ref": "main",
+        "base_commit": "b" * 40,
+        "workspace_id": workspace_id,
+        "changed_files": ["src/changed.py"],
+        "diff_digest": diff_digest,
+        "content_digest": content_digest,
+    }
+    change_ref = digest(identity)
     evidence = {
         "verification": "candidate_identity_verified",
+        "algorithm": "sha256",
         "change_ref": change_ref,
         "workspace_id": workspace_id,
         "repository": "ai-hq",
         "base_ref": "main",
         "base_commit": "b" * 40,
+        "diff_digest": diff_digest,
         "content_digest": content_digest,
     }
     return root, workspace, change_ref, evidence
@@ -101,15 +114,29 @@ def test_store_reads_only_verified_changed_regular_files(tmp_path):
 
 
 def test_store_represents_verified_deletion_as_none(tmp_path):
-    root, _, change_ref, evidence = build_candidate(tmp_path)
+    root, _, _, evidence = build_candidate(tmp_path)
+    changed_files = ("removed.txt",)
+    identity = {
+        "mission_id": "mission-1",
+        "repository": evidence["repository"],
+        "base_ref": evidence["base_ref"],
+        "base_commit": evidence["base_commit"],
+        "workspace_id": evidence["workspace_id"],
+        "changed_files": list(changed_files),
+        "diff_digest": evidence["diff_digest"],
+        "content_digest": evidence["content_digest"],
+    }
+    change_ref = digest(identity)
+    evidence["change_ref"] = change_ref
+    store = CandidateStore(root)
     candidate = load(
-        CandidateStore(root),
+        store,
         change_ref,
         evidence,
-        changed_files=("removed.txt",),
+        changed_files=changed_files,
     )
 
-    assert CandidateStore(root).read_changed_file(candidate, "removed.txt") is None
+    assert store.read_changed_file(candidate, "removed.txt") is None
 
 
 @pytest.mark.parametrize(
@@ -120,7 +147,7 @@ def test_store_represents_verified_deletion_as_none(tmp_path):
         ("base_ref", "other", "base"),
         ("base_commit", "not-a-commit", "base"),
         ("workspace_id", "../escape", "workspace"),
-        ("content_digest", "sha256:" + "d" * 64, "digest"),
+        ("content_digest", "sha256:" + "d" * 64, "digest|change_ref"),
     ],
 )
 def test_store_fails_closed_on_tampered_machine_evidence(
@@ -131,6 +158,18 @@ def test_store_fails_closed_on_tampered_machine_evidence(
 
     with pytest.raises((ValueError, KeyError), match=message):
         load(CandidateStore(root), change_ref, evidence)
+
+
+def test_store_rejects_changed_files_that_do_not_match_change_ref(tmp_path):
+    root, _, change_ref, evidence = build_candidate(tmp_path)
+
+    with pytest.raises(ValueError, match="change_ref"):
+        load(
+            CandidateStore(root),
+            change_ref,
+            evidence,
+            changed_files=("different.py",),
+        )
 
 
 def test_store_rejects_workspace_symlink(tmp_path):
@@ -165,18 +204,31 @@ def test_store_rejects_unsafe_or_duplicate_changed_paths(tmp_path):
 
 
 def test_store_rejects_symlink_as_changed_file(tmp_path):
-    root, workspace, change_ref, evidence = build_candidate(tmp_path)
+    root, workspace, _, evidence = build_candidate(tmp_path)
     outside = tmp_path / "outside.txt"
     outside.write_text("secret\n")
     (workspace / "link.txt").symlink_to(outside)
     evidence["content_digest"] = digest(manifest(workspace))
+    changed_files = ("link.txt",)
+    identity = {
+        "mission_id": "mission-1",
+        "repository": evidence["repository"],
+        "base_ref": evidence["base_ref"],
+        "base_commit": evidence["base_commit"],
+        "workspace_id": evidence["workspace_id"],
+        "changed_files": list(changed_files),
+        "diff_digest": evidence["diff_digest"],
+        "content_digest": evidence["content_digest"],
+    }
+    change_ref = digest(identity)
+    evidence["change_ref"] = change_ref
 
     store = CandidateStore(root)
     candidate = load(
         store,
         change_ref,
         evidence,
-        changed_files=("link.txt",),
+        changed_files=changed_files,
     )
 
     with pytest.raises(ValueError, match="regular|symlink"):
