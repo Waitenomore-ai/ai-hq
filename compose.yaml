@@ -42,6 +42,10 @@ services:
     - /run/ai-hq:/run/ai-hq:ro
     - /opt/ai-hq/repository-mirrors:/srv/ai-hq/repository-mirrors:ro
     - /opt/ai-hq/repository-sandboxes:/srv/ai-hq/repository-sandboxes
+    secrets:
+    - source: ai_hq_github_publisher_token
+      target: ai-hq-github-publisher-token
+      mode: 0400
     networks:
     - ai_hq
     restart: unless-stopped
@@ -88,3 +92,6 @@ networks:
 volumes:
   postgres_data: null
   redis_data: null
+secrets:
+  ai_hq_github_publisher_token:
+    file: ${AI_HQ_GITHUB_PUBLISH_TOKEN_SOURCE:-/dev/null}
