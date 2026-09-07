@@ -27,6 +27,21 @@ def factory():
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 
+class RecoveryStatusProvider:
+    def snapshot(self, target):
+        assert target == "dripvid"
+        return {
+            "last_probe_at": None,
+            "last_result": "unknown",
+            "reachable": None,
+            "status_code": None,
+            "ready": None,
+            "consecutive_failures": 0,
+            "active_incident_id": None,
+            "active_incident_state": None,
+        }
+
+
 def test_snapshot_uses_durable_agent_and_mission_state():
     sessions = factory()
     with sessions() as db:
@@ -209,3 +224,28 @@ def test_completed_agent_status_projects_to_idle():
 
     rooms = {room["key"]: room for room in HQStateService(sessions).snapshot()["rooms"]}
     assert rooms["calendar"]["state"] == "IDLE"
+
+
+def test_snapshot_includes_bounded_recovery_status_and_current_settings():
+    sessions = factory()
+    state = HQStateService(
+        sessions,
+        recovery_status_service=RecoveryStatusProvider(),
+        recovery_settings_provider=lambda: {
+            "enabled": False,
+            "observe_only": True,
+        },
+    )
+
+    assert state.snapshot()["recovery"] == {
+        "enabled": False,
+        "observe_only": True,
+        "last_probe_at": None,
+        "last_result": "unknown",
+        "reachable": None,
+        "status_code": None,
+        "ready": None,
+        "consecutive_failures": 0,
+        "active_incident_id": None,
+        "active_incident_state": None,
+    }
