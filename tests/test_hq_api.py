@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -10,6 +12,7 @@ from ai_hq.config import Settings
 from ai_hq.db import Base
 from ai_hq.missions.models import Mission, MissionStatus
 from ai_hq.models.admin_session import AdminSession
+from ai_hq.recovery.models import RecoveryStatus, RecoveryStatusResult
 
 HELPER_SECRET_SENTINEL = "hq-helper-secret-must-never-reach-browser"
 RAW_HELPER_BODY_SENTINEL = "raw-helper-request-body-must-never-reach-browser"
@@ -50,6 +53,8 @@ def build_client():
         admin_password_hash=PasswordHasher().hash("separate-ai-hq-password"),
         session_secret="s" * 48,
         host_helper_credential=HELPER_SECRET_SENTINEL,
+        recovery_enabled=True,
+        recovery_observe_only=True,
     )
     app = create_app(
         settings=settings,
@@ -98,6 +103,40 @@ def test_hq_state_returns_stable_first_floor_rooms():
     ]
 
 
+def test_hq_state_exposes_configured_observe_only_recovery_snapshot():
+    client, factory = build_client()
+    observed_at = datetime(2026, 9, 7, 19, 30, tzinfo=UTC)
+    with factory() as db:
+        db.add(
+            RecoveryStatus(
+                target="dripvid",
+                last_probe_at=observed_at,
+                last_result=RecoveryStatusResult.HEALTHY,
+                reachable=True,
+                status_code=200,
+                ready=True,
+                consecutive_failures=0,
+            )
+        )
+        db.commit()
+
+    auth = login(client, factory)
+    response = client.get("/api/hq/state", headers=auth)
+
+    assert response.status_code == 200
+    recovery = response.json()["recovery"]
+    assert recovery["enabled"] is True
+    assert recovery["observe_only"] is True
+    assert recovery["last_result"] == "healthy"
+    assert recovery["reachable"] is True
+    assert recovery["status_code"] == 200
+    assert recovery["ready"] is True
+    assert recovery["consecutive_failures"] == 0
+    assert recovery["active_incident_id"] is None
+    assert recovery["active_incident_state"] is None
+    assert recovery["last_probe_at"].startswith("2026-09-07T19:30:00")
+
+
 def test_hq_state_exposes_only_friendly_mission_projection_not_helper_secrets():
     client, factory = build_client()
     with factory() as db:
@@ -117,6 +156,16 @@ def test_hq_state_exposes_only_friendly_mission_projection_not_helper_secrets():
                 role="Infrastructure",
                 status=AgentStatus.WORKING,
                 current_mission_id=mission.id,
+            )
+        )
+        db.add(
+            RecoveryStatus(
+                target="dripvid",
+                last_result=RecoveryStatusResult.ERROR,
+                reachable=None,
+                status_code=None,
+                ready=None,
+                consecutive_failures=0,
             )
         )
         db.commit()
