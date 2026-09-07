@@ -99,6 +99,7 @@ class CandidateVerifier:
             "workspace_id": snapshot.workspace_id,
             "repository": snapshot.repository,
             "base_ref": snapshot.base_ref,
+            "base_commit": snapshot.base_commit,
             "diff_digest": snapshot.diff_digest,
             "content_digest": snapshot.content_digest,
             "tests": {
