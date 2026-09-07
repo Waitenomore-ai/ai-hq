@@ -1,3 +1,4 @@
+import logging
 import time
 
 from ai_hq.agents.registry import AgentRegistry
@@ -218,6 +219,7 @@ def run_worker_iteration(
 
 
 def run_worker() -> int:
+    logging.basicConfig(level=logging.INFO)
     settings = get_settings()
 
     if not redis_ping():
