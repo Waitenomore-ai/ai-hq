@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     host_helper_credential: str | None = None
     repository_sandbox_root: str | None = None
     ai_hq_repository_source: str | None = None
+    dripvid_repository_source: str | None = None
 
     # DripVid automatic-recovery policy. Recovery is deliberately disabled and
     # observe-only by default. These values are operator configuration and are
@@ -85,6 +86,15 @@ class Settings(BaseSettings):
         if self.ai_hq_repository_source is None:
             return None
         return Path(self.ai_hq_repository_source).expanduser().resolve()
+
+
+    @property
+    def dripvid_repository_source_path(self) -> Path | None:
+        if self.dripvid_repository_source is None:
+            return None
+        return Path(
+            self.dripvid_repository_source
+        ).expanduser().resolve()
 
     @model_validator(mode="after")
     def validate_repository_sandbox_paths(self) -> "Settings":

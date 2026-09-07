@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from ai_hq.chat.intents import plan_sysadmin_intent
 from ai_hq.chat.model_client import ChatModelClient, ChatModelError
@@ -53,6 +53,16 @@ If the evidence is incomplete, say that it is incomplete.
 
 When determining current state, prefer current health and service status evidence over historical log events. Historical log failures do not establish a current failure when current service status shows the service is healthy or running. Describe such log events as historical unless the supplied evidence shows they are still occurring.
 """
+
+
+class CodeChangePreparer(Protocol):
+    def prepare_candidate(
+        self,
+        *,
+        repository: str,
+        instruction: str,
+    ) -> Any:
+        ...
 
 
 @dataclass(frozen=True)
@@ -180,11 +190,13 @@ class ChatController:
         mission_service: MissionService,
         tool_registry: ToolRegistry,
         model_client: ChatModelClient | None,
+        code_change_service: CodeChangePreparer | None = None,
     ) -> None:
         self.chat_service = chat_service
         self.mission_service = mission_service
         self.tool_registry = tool_registry
         self.model_client = model_client
+        self.code_change_service = code_change_service
 
     def submit(
         self,
@@ -234,6 +246,76 @@ class ChatController:
             return self._conversation_reply(
                 owner_session_id=owner_session_id,
                 conversation_id=conversation_id,
+            )
+
+        if intent.kind == "code_change":
+            if self.code_change_service is None:
+                message = self.chat_service.add_message(
+                    conversation_id=conversation_id,
+                    owner_session_id=owner_session_id,
+                    role="assistant",
+                    content=(
+                        "Code-change preparation is not configured "
+                        "on this AI HQ instance."
+                    ),
+                )
+
+                return ChatControllerResult(
+                    state="unavailable",
+                    message=message,
+                )
+
+            result = self.code_change_service.prepare_candidate(
+                repository=intent.repository,
+                instruction=text,
+            )
+
+            changed_files = "\n".join(
+                f"- `{path}`"
+                for path in result.changed_files
+            )
+
+            if not changed_files:
+                changed_files = "- No changed files reported"
+
+            readiness = (
+                "READY FOR APPROVAL"
+                if result.ready_for_approval
+                else "NOT READY FOR APPROVAL"
+            )
+
+            risk = (
+                "HIGH RISK"
+                if result.high_risk
+                else "NORMAL REVIEW"
+            )
+
+            content = (
+                f"## Code Candidate: {result.repository}\n\n"
+                f"{result.summary}\n\n"
+                f"**Changed files**\n{changed_files}\n\n"
+                f"**Candidate:** `{result.change_ref}`\n\n"
+                f"**Review:** {risk}\n\n"
+                f"**Status:** {readiness}\n\n"
+                "No code was published or deployed."
+            )
+
+            message = self.chat_service.add_message(
+                conversation_id=conversation_id,
+                owner_session_id=owner_session_id,
+                role="assistant",
+                content=content,
+                mission_id=result.mission_id,
+            )
+
+            return ChatControllerResult(
+                state=(
+                    "waiting_approval"
+                    if result.ready_for_approval
+                    else "candidate_rejected"
+                ),
+                message=message,
+                mission_id=result.mission_id,
             )
 
         if intent.kind != "operational":

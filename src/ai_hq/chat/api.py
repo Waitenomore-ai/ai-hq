@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ai_hq.chat.controller import ChatController
 from ai_hq.chat.model_client import build_chat_model_client
 from ai_hq.chat.service import ChatAccessDenied, ChatService
+from ai_hq.code_changes.runtime import build_code_change_service
 from ai_hq.missions.service import MissionService
 from ai_hq.web import _origin_is_allowed, resolve_request_session
 
@@ -202,11 +203,18 @@ def install_chat_routes(
     tool_registry = ValidationToolRegistry()
     model_client = build_chat_model_client(settings)
 
+    code_change_service = build_code_change_service(
+        settings=settings,
+        session_factory=session_factory,
+        model_client=model_client,
+    )
+
     chat_controller = ChatController(
         chat_service=chat_service,
         mission_service=mission_service,
         tool_registry=tool_registry,
         model_client=model_client,
+        code_change_service=code_change_service,
     )
 
     @app.get("/api/chat/conversations")

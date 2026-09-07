@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from ai_hq.chat.model_client import ChatModelClient
@@ -153,10 +154,51 @@ class ModelBackedDeveloperAgent:
     execute code and grants no production or command authority.
     """
 
-    def __init__(self, model_client: ChatModelClient) -> None:
+    def __init__(
+        self,
+        model_client: ChatModelClient,
+        *,
+        context_provider: Callable[[str], dict[str, Any]] | None = None,
+    ) -> None:
         self.model_client = model_client
+        self.context_provider = context_provider
 
     def execute(self, *, mission_id: str) -> dict[str, Any]:
+        repository_context: dict[str, Any] = {}
+
+        if self.context_provider is not None:
+            supplied = self.context_provider(mission_id)
+
+            if not isinstance(supplied, dict):
+                raise ValueError(
+                    "Developer context provider must return a mapping"
+                )
+
+            repository = supplied.get("repository")
+            instruction = supplied.get("instruction")
+            files = supplied.get("files")
+
+            if repository not in {"ai-hq", "dripvid"}:
+                raise ValueError(
+                    "Developer context requires trusted repository"
+                )
+
+            if not isinstance(instruction, str) or not instruction.strip():
+                raise ValueError(
+                    "Developer context requires instruction"
+                )
+
+            if not isinstance(files, list):
+                raise ValueError(
+                    "Developer context files must be a list"
+                )
+
+            repository_context = {
+                "repository": repository,
+                "instruction": instruction.strip(),
+                "files": files,
+            }
+
         raw = self.model_client.reply(
             _DEVELOPER_SYSTEM_PROMPT,
             [
@@ -169,6 +211,7 @@ class ModelBackedDeveloperAgent:
                                 "Produce the structured Developer repository "
                                 "file changes for this mission."
                             ),
+                            "repository_context": repository_context,
                         },
                         sort_keys=True,
                     ),
