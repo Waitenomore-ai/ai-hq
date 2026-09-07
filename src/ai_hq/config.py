@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     def github_publish_token_file_path(self) -> Path | None:
         if self.github_publish_token_file is None:
             return None
-        return Path(self.github_publish_token_file).expanduser().resolve()
+        return Path(self.github_publish_token_file).expanduser()
 
     @model_validator(mode="after")
     def validate_repository_sandbox_paths(self) -> "Settings":
