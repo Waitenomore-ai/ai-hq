@@ -66,6 +66,26 @@ compose_release() {
     "$@"
 }
 
+database_revision() {
+  local release="$1"
+  compose_release "$release" exec -T postgres sh -eu -c '
+    psql \
+      -U "$POSTGRES_USER" \
+      -d "$POSTGRES_DB" \
+      -Atc "SELECT version_num FROM alembic_version;"
+  '
+}
+
+activate_release_link() {
+  local release="$1"
+  local label="$2"
+  local next_link="$BASE/.app-${label}"
+
+  rm -f "$next_link"
+  ln -s "$release" "$next_link"
+  mv -Tf "$next_link" "$APP_LINK"
+}
+
 compose_release "$RELEASE" config >/dev/null
 
 PREVIOUS=""
@@ -75,14 +95,19 @@ elif [[ -e "$APP_LINK" ]]; then
   fail "$APP_LINK must be a symlink before automatic deployment"
 fi
 
+DB_REVISION_BEFORE=""
+if [[ -n "$PREVIOUS" ]]; then
+  if ! DB_REVISION_BEFORE="$(database_revision "$PREVIOUS")"; then
+    fail "database revision could not be verified before deployment"
+  fi
+  [[ -n "$DB_REVISION_BEFORE" ]] || fail "database revision could not be verified before deployment"
+fi
+
 rollback() {
   echo "ai-hq-deploy: rollback started" >&2
   if [[ -n "$PREVIOUS" && -d "$PREVIOUS" && -f "$PREVIOUS/compose.yaml" ]]; then
     compose_release "$PREVIOUS" up -d --build
-    ROLLBACK_LINK="$BASE/.app-rollback"
-    rm -f "$ROLLBACK_LINK"
-    ln -s "$PREVIOUS" "$ROLLBACK_LINK"
-    mv -Tf "$ROLLBACK_LINK" "$APP_LINK"
+    activate_release_link "$PREVIOUS" "rollback"
   else
     compose_release "$RELEASE" down || true
   fi
@@ -100,14 +125,32 @@ for _ in $(seq 1 40); do
 done
 
 if [[ "$healthy" != true ]]; then
-  rollback
-  fail "new release failed readiness and was rolled back"
+  if [[ -n "$PREVIOUS" ]]; then
+    DB_REVISION_AFTER=""
+    if ! DB_REVISION_AFTER="$(database_revision "$RELEASE")"; then
+      activate_release_link "$RELEASE" "recovery-${SHA}"
+      fail "database revision could not be verified after readiness failure; refusing automatic rollback"
+    fi
+
+    if [[ -z "$DB_REVISION_AFTER" ]]; then
+      activate_release_link "$RELEASE" "recovery-${SHA}"
+      fail "database revision could not be verified after readiness failure; refusing automatic rollback"
+    fi
+
+    if [[ "$DB_REVISION_AFTER" == "$DB_REVISION_BEFORE" ]]; then
+      rollback
+      fail "new release failed readiness and was rolled back"
+    fi
+
+    activate_release_link "$RELEASE" "recovery-${SHA}"
+    fail "new release failed readiness and database revision changed during deployment; automatic rollback is unsafe"
+  fi
+
+  compose_release "$RELEASE" down || true
+  fail "new release failed readiness"
 fi
 
-NEW_LINK="$BASE/.app-${SHA}"
-rm -f "$NEW_LINK"
-ln -s "$RELEASE" "$NEW_LINK"
-mv -Tf "$NEW_LINK" "$APP_LINK"
+activate_release_link "$RELEASE" "$SHA"
 
 CURRENT="$(readlink -f "$APP_LINK")"
 mapfile -t OLD_RELEASES < <(
