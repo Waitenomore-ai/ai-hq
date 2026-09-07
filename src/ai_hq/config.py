@@ -7,6 +7,10 @@ from urllib.parse import urlsplit
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ai_hq.repository_source_policy import (
+    validate_production_repository_paths,
+)
+
 
 class OperatingMode(StrEnum):
     NORMAL = "normal"
@@ -29,6 +33,7 @@ class Settings(BaseSettings):
     session_lifetime_hours: int = 12
     host_helper_socket: str = "/run/ai-hq/host-helper.sock"
     host_helper_credential: str | None = None
+    repository_mirror_root: str | None = None
     repository_sandbox_root: str | None = None
     ai_hq_repository_source: str | None = None
     dripvid_repository_source: str | None = None
@@ -74,6 +79,14 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.casefold() == "production"
+
+    @property
+    def repository_mirror_root_path(self) -> Path | None:
+        if self.repository_mirror_root is None:
+            return None
+        return Path(
+            self.repository_mirror_root
+        ).expanduser().resolve()
 
     @property
     def repository_sandbox_root_path(self) -> Path | None:
@@ -127,6 +140,27 @@ class Settings(BaseSettings):
                     f"the {repository_name} repository source"
                 )
 
+        return self
+
+    @model_validator(mode="after")
+    def validate_production_repository_sources(
+        self,
+    ) -> "Settings":
+        validate_production_repository_paths(
+            is_production=self.is_production,
+            mirror_root=(
+                self.repository_mirror_root_path
+            ),
+            sandbox_root=(
+                self.repository_sandbox_root_path
+            ),
+            ai_hq_source=(
+                self.ai_hq_repository_source_path
+            ),
+            dripvid_source=(
+                self.dripvid_repository_source_path
+            ),
+        )
         return self
 
     @model_validator(mode="after")

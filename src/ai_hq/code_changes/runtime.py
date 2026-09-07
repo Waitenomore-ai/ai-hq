@@ -6,6 +6,9 @@ from ai_hq.code_changes.context import (
     RepositoryContextProvider,
 )
 from ai_hq.code_changes.service import CodeChangeService
+from ai_hq.repository_source_policy import (
+    validate_production_repository_paths,
+)
 from ai_hq.delivery.agent_runner import DeliveryAgentRunner
 from ai_hq.delivery.candidate_verifier import CandidateVerifier
 from ai_hq.delivery.model_agents import (
@@ -46,6 +49,26 @@ def build_code_change_service(
     )
     dripvid_source = (
         settings.dripvid_repository_source_path
+    )
+
+    mirror_root = getattr(
+        settings,
+        "repository_mirror_root_path",
+        None,
+    )
+
+    validate_production_repository_paths(
+        is_production=bool(
+            getattr(
+                settings,
+                "is_production",
+                False,
+            )
+        ),
+        mirror_root=mirror_root,
+        sandbox_root=sandbox_root,
+        ai_hq_source=ai_hq_source,
+        dripvid_source=dripvid_source,
     )
 
     if (
