@@ -24,3 +24,19 @@ def test_ai_hq_compose_has_no_docker_socket_or_privileged_service():
         volumes = service.get("volumes", [])
         assert all("/var/run/docker.sock" not in str(volume) for volume in volumes)
         assert service.get("privileged") is not True
+
+
+def test_web_receives_only_read_only_repository_mirrors():
+    services = load_compose()["services"]
+    web_volumes = services["web"].get("volumes", [])
+
+    assert (
+        "/opt/ai-hq/repository-mirrors:"
+        "/srv/ai-hq/repository-mirrors:ro"
+    ) in web_volumes
+
+    assert all(
+        "/srv/ai-hq/repository-sandboxes"
+        not in str(volume)
+        for volume in web_volumes
+    )
