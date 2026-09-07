@@ -6,7 +6,9 @@ from typing import Protocol
 
 _SHA256_PREFIX = "sha256:"
 _SHA256_HEX_LENGTH = 64
+_GIT_SHA_LENGTH = 40
 _MAX_TEST_SUMMARY_LENGTH = 4000
+NO_GIT_BASE_COMMIT = "0" * _GIT_SHA_LENGTH
 
 
 def _required(value: str, *, field: str) -> str:
@@ -29,6 +31,19 @@ def _sha256_digest(value: str, *, field: str) -> str:
     except ValueError as exc:
         raise ValueError(f"{field} must be a sha256 digest") from exc
 
+    return value
+
+
+def _git_commit(value: str, *, field: str) -> str:
+    value = _required(value, field=field)
+    if len(value) != _GIT_SHA_LENGTH or value != value.lower():
+        raise ValueError(f"{field} must be a 40-character lowercase Git commit")
+    try:
+        int(value, 16)
+    except ValueError as exc:
+        raise ValueError(
+            f"{field} must be a 40-character lowercase Git commit"
+        ) from exc
     return value
 
 
@@ -63,6 +78,7 @@ class RepositoryWorkspace:
     repository: str
     base_ref: str
     workspace_id: str
+    base_commit: str = NO_GIT_BASE_COMMIT
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -85,6 +101,11 @@ class RepositoryWorkspace:
             "workspace_id",
             _required(self.workspace_id, field="workspace_id"),
         )
+        object.__setattr__(
+            self,
+            "base_commit",
+            _git_commit(self.base_commit, field="base_commit"),
+        )
 
 
 @dataclass(frozen=True)
@@ -97,6 +118,7 @@ class CandidateSnapshot:
     changed_files: tuple[str, ...]
     diff_digest: str
     content_digest: str
+    base_commit: str = NO_GIT_BASE_COMMIT
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -113,6 +135,11 @@ class CandidateSnapshot:
             self,
             "base_ref",
             _required(self.base_ref, field="base_ref"),
+        )
+        object.__setattr__(
+            self,
+            "base_commit",
+            _git_commit(self.base_commit, field="base_commit"),
         )
 
         if not isinstance(self.changed_files, tuple):
@@ -143,6 +170,7 @@ class CandidateSnapshot:
             "mission_id": _required(mission_id, field="mission_id"),
             "repository": self.repository,
             "base_ref": self.base_ref,
+            "base_commit": self.base_commit,
             "workspace_id": self.workspace_id,
             "changed_files": list(self.changed_files),
             "diff_digest": self.diff_digest,
