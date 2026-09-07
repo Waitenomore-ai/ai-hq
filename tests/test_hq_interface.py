@@ -121,3 +121,46 @@ def test_hq_mobile_and_reduced_motion_contract():
     css = client.get("/static/hq.css")
     assert css.status_code == 200
     assert "prefers-reduced-motion: reduce" in css.text
+
+
+def test_recovery_card_is_non_interactive_and_has_stable_status_hooks():
+    client, auth = build_authenticated_client()
+    html = client.get("/", headers=auth).text
+    start = html.index("data-recovery-card")
+    end = html.index("</section>", start)
+    card = html[start:end]
+
+    for hook in (
+        "data-recovery-state",
+        "data-recovery-mode",
+        "data-recovery-last-probe",
+        "data-recovery-failures",
+        "data-recovery-incident",
+    ):
+        assert hook in card
+
+    assert "DripVid Recovery" in card
+    assert "Waiting for first probe" in card
+    assert "Observe only" in card
+    assert "<button" not in card
+    assert "<form" not in card
+    assert "data-action" not in card
+
+
+def test_recovery_client_projection_is_bounded_and_text_only():
+    client, _auth = build_authenticated_client()
+    script = client.get("/static/hq.js")
+    assert script.status_code == 200
+    text = script.text
+
+    assert "normalizeRecovery" in text
+    assert 'new Set(["healthy", "unhealthy", "error", "unknown"])' in text
+    assert 'enabled ? "" : "Disabled"' in text or 'if (!recovery.enabled)' in text
+    assert '"Active recovery configured"' in text
+    assert '"Observe only"' in text
+    assert "data-recovery-state" in text
+    assert "textContent" in text
+
+    recovery_section = text[text.index("normalizeRecovery"):text.index("const markDisconnected")]
+    assert "innerHTML" not in recovery_section
+    assert "fetch(" not in recovery_section
