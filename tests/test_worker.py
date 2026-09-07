@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,15 @@ def test_freeze_mode_blocks_worker_execution():
 
 def test_safe_mode_allows_read_only_worker_loop():
     assert execution_allowed(OperatingMode.SAFE) is True
+
+
+def test_worker_configures_info_logging_for_recovery_heartbeat(monkeypatch):
+    configured = []
+    monkeypatch.setattr(worker.logging, "basicConfig", lambda **kwargs: configured.append(kwargs))
+    monkeypatch.setattr(worker, "redis_ping", lambda: False)
+
+    assert worker.run_worker() == 1
+    assert configured == [{"level": logging.INFO}]
 
 
 def test_worker_stays_alive_in_safe_mode(monkeypatch):
