@@ -98,13 +98,35 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_repository_sandbox_paths(self) -> "Settings":
-        source = self.ai_hq_repository_source_path
         sandbox = self.repository_sandbox_root_path
-        if source is None or sandbox is None:
+        if sandbox is None:
             return self
 
-        if source == sandbox or source in sandbox.parents or sandbox in source.parents:
-            raise ValueError("repository sandbox must not overlap the AI HQ repository source")
+        sources = (
+            (
+                "AI HQ",
+                self.ai_hq_repository_source_path,
+            ),
+            (
+                "DripVid",
+                self.dripvid_repository_source_path,
+            ),
+        )
+
+        for repository_name, source in sources:
+            if source is None:
+                continue
+
+            if (
+                source == sandbox
+                or source in sandbox.parents
+                or sandbox in source.parents
+            ):
+                raise ValueError(
+                    "repository sandbox must not overlap "
+                    f"the {repository_name} repository source"
+                )
+
         return self
 
     @model_validator(mode="after")
