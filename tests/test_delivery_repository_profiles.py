@@ -13,7 +13,7 @@ def test_ai_hq_profile_has_fixed_trusted_test_commands(tmp_path):
 
     assert profile.key == "ai-hq"
     assert profile.source_path == tmp_path.resolve()
-    assert profile.base_ref == "HEAD"
+    assert profile.base_ref == "main"
     assert len(profile.test_commands) == 2
     assert profile.test_commands[0][1:4] == ("-m", "ruff", "check")
     assert profile.test_commands[1][1:3] == ("-m", "pytest")
