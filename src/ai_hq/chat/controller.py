@@ -56,11 +56,18 @@ When determining current state, prefer current health and service status evidenc
 
 
 class CodeChangePreparer(Protocol):
-    def prepare_candidate(
+    def queue_candidate(
         self,
         *,
         repository: str,
         instruction: str,
+    ) -> Any:
+        ...
+
+    def candidate_result(
+        self,
+        *,
+        mission_id: str,
     ) -> Any:
         ...
 
@@ -265,57 +272,34 @@ class ChatController:
                     message=message,
                 )
 
-            result = self.code_change_service.prepare_candidate(
-                repository=intent.repository,
-                instruction=text,
-            )
-
-            changed_files = "\n".join(
-                f"- `{path}`"
-                for path in result.changed_files
-            )
-
-            if not changed_files:
-                changed_files = "- No changed files reported"
-
-            readiness = (
-                "READY FOR APPROVAL"
-                if result.ready_for_approval
-                else "NOT READY FOR APPROVAL"
-            )
-
-            risk = (
-                "HIGH RISK"
-                if result.high_risk
-                else "NORMAL REVIEW"
-            )
-
-            content = (
-                f"## Code Candidate: {result.repository}\n\n"
-                f"{result.summary}\n\n"
-                f"**Changed files**\n{changed_files}\n\n"
-                f"**Candidate:** `{result.change_ref}`\n\n"
-                f"**Review:** {risk}\n\n"
-                f"**Status:** {readiness}\n\n"
-                "No code was published or deployed."
+            queued = (
+                self.code_change_service
+                .queue_candidate(
+                    repository=intent.repository,
+                    instruction=text,
+                )
             )
 
             message = self.chat_service.add_message(
                 conversation_id=conversation_id,
                 owner_session_id=owner_session_id,
                 role="assistant",
-                content=content,
-                mission_id=result.mission_id,
+                content=(
+                    f"## Code Change Queued: "
+                    f"{queued.repository}\n\n"
+                    "The request has been queued for "
+                    "the AI HQ worker. Developer, "
+                    "sandbox verification, tests and QA "
+                    "will run outside this chat request.\n\n"
+                    "No code was published or deployed."
+                ),
+                mission_id=queued.mission_id,
             )
 
             return ChatControllerResult(
-                state=(
-                    "waiting_approval"
-                    if result.ready_for_approval
-                    else "candidate_rejected"
-                ),
+                state="pending",
                 message=message,
-                mission_id=result.mission_id,
+                mission_id=queued.mission_id,
             )
 
         if intent.kind != "operational":
@@ -381,6 +365,49 @@ class ChatController:
 
         mission = self.mission_service.get_mission(mission_id)
 
+        if (
+            mission.owner_agent == "developer"
+            and mission.source == "hq_chat_code_change"
+        ):
+            if mission.status in {
+                MissionStatus.WAITING_APPROVAL,
+                MissionStatus.COMPLETED,
+            }:
+                return self._completed_code_change_reply(
+                    owner_session_id=owner_session_id,
+                    conversation_id=conversation_id,
+                    mission_id=mission_id,
+                )
+
+            if mission.status in {
+                MissionStatus.FAILED,
+                MissionStatus.CANCELLED,
+            }:
+                message = self.chat_service.add_message(
+                    conversation_id=conversation_id,
+                    owner_session_id=owner_session_id,
+                    role="assistant",
+                    content=(
+                        "## Code Change Failed Safely\n\n"
+                        "The worker could not produce a "
+                        "verified candidate.\n\n"
+                        "No code was published or deployed."
+                    ),
+                    mission_id=mission_id,
+                )
+
+                return ChatControllerResult(
+                    state="candidate_failed",
+                    message=message,
+                    mission_id=mission_id,
+                )
+
+            return ChatControllerResult(
+                state="pending",
+                message=linked[-1],
+                mission_id=mission_id,
+            )
+
         if mission.owner_agent != "sysadmin":
             raise PermissionError(
                 "mission is not owned by SysAdmin"
@@ -411,6 +438,90 @@ class ChatController:
         return ChatControllerResult(
             state="pending",
             message=linked[-1],
+            mission_id=mission_id,
+        )
+
+    def _completed_code_change_reply(
+        self,
+        *,
+        owner_session_id: str,
+        conversation_id: str,
+        mission_id: str,
+    ) -> ChatControllerResult:
+        messages = self.chat_service.messages(
+            conversation_id=conversation_id,
+            owner_session_id=owner_session_id,
+        )
+
+        existing = [
+            item
+            for item in messages
+            if (
+                item.mission_id == mission_id
+                and item.role == "assistant"
+                and item.content.startswith(
+                    "## Code Candidate:"
+                )
+            )
+        ]
+
+        if existing:
+            return ChatControllerResult(
+                state="waiting_approval",
+                message=existing[-1],
+                mission_id=mission_id,
+            )
+
+        result = (
+            self.code_change_service
+            .candidate_result(
+                mission_id=mission_id
+            )
+        )
+
+        changed = "\n".join(
+            f"- `{path}`"
+            for path in result.changed_files
+        ) or "- No changed files reported"
+
+        status = (
+            "READY FOR APPROVAL"
+            if result.ready_for_approval
+            else "NOT READY FOR APPROVAL"
+        )
+
+        risk = (
+            "HIGH RISK"
+            if result.high_risk
+            else "NORMAL REVIEW"
+        )
+
+        message = self.chat_service.add_message(
+            conversation_id=conversation_id,
+            owner_session_id=owner_session_id,
+            role="assistant",
+            content=(
+                f"## Code Candidate: "
+                f"{result.repository}\n\n"
+                f"{result.summary}\n\n"
+                f"**Changed files**\n"
+                f"{changed}\n\n"
+                f"**Candidate:** "
+                f"`{result.change_ref}`\n\n"
+                f"**Review:** {risk}\n\n"
+                f"**Status:** {status}\n\n"
+                "No code was published or deployed."
+            ),
+            mission_id=mission_id,
+        )
+
+        return ChatControllerResult(
+            state=(
+                "waiting_approval"
+                if result.ready_for_approval
+                else "candidate_rejected"
+            ),
+            message=message,
             mission_id=mission_id,
         )
 

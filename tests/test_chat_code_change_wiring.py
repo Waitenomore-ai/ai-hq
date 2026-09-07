@@ -86,8 +86,9 @@ class FakeChatService:
 class FakeCodeChangeService:
     def __init__(self):
         self.calls = []
+        self.result_calls = []
 
-    def prepare_candidate(
+    def queue_candidate(
         self,
         *,
         repository,
@@ -97,8 +98,26 @@ class FakeCodeChangeService:
             (repository, instruction)
         )
 
+        return type(
+            "QueuedCodeChange",
+            (),
+            {
+                "mission_id": "mission-code-1",
+                "repository": repository,
+            },
+        )()
+
+    def candidate_result(
+        self,
+        *,
+        mission_id,
+    ):
+        self.result_calls.append(
+            mission_id
+        )
+
         return FakeCodeChangeResult(
-            repository=repository,
+            mission_id=mission_id,
         )
 
 
@@ -141,12 +160,13 @@ def test_chat_code_change_calls_code_change_service():
         )
     ]
 
-    assert result.state == "waiting_approval"
+    assert result.state == "pending"
     assert result.mission_id == "mission-code-1"
+    assert changes.result_calls == []
 
 
-def test_chat_candidate_summary_is_bounded_and_clear():
-    controller, _chat, _changes = build_controller()
+def test_chat_queue_summary_is_bounded_and_clear():
+    controller, _chat, changes = build_controller()
 
     result = controller.submit(
         owner_session_id="session-1",
@@ -157,9 +177,9 @@ def test_chat_candidate_summary_is_bounded_and_clear():
     content = result.message.content
 
     assert "dripvid" in content.lower()
-    assert "public/css/app.css" in content
-    assert "sha256:" in content
-    assert "ready for approval" in content.lower()
+    assert "queued" in content.lower()
+    assert "worker" in content.lower()
+    assert changes.result_calls == []
     assert (
         "no code was published or deployed"
         in content.lower()

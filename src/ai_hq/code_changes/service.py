@@ -9,6 +9,7 @@ from ai_hq.delivery.service import DeliveryService
 from ai_hq.missions.models import (
     MissionPriority,
     MissionRisk,
+    MissionStatus,
 )
 from ai_hq.missions.service import MissionService
 
@@ -44,6 +45,12 @@ class DeliveryRunnerFactory(Protocol):
         repository: str,
     ) -> DeliveryAgentRunner:
         ...
+
+
+@dataclass(frozen=True)
+class QueuedCodeChange:
+    mission_id: str
+    repository: str
 
 
 @dataclass(frozen=True)
@@ -89,6 +96,154 @@ class CodeChangeService:
         self.delivery_service = delivery_service
         self.runner_factory = runner_factory
 
+    def queue_candidate(
+        self,
+        *,
+        repository: str,
+        instruction: str,
+    ) -> QueuedCodeChange:
+        repository = self._trusted_repository(
+            repository
+        )
+        instruction = self._instruction(
+            instruction
+        )
+
+        mission = self.mission_service.create_mission(
+            title=f"Code change: {repository}",
+            description=instruction,
+            owner_agent="developer",
+            source="hq_chat_code_change",
+            priority=MissionPriority.NORMAL,
+            risk=MissionRisk.AMBER,
+            objectives=[
+                repository,
+                instruction,
+            ],
+            dependencies=[],
+        )
+
+        return QueuedCodeChange(
+            mission_id=mission.id,
+            repository=repository,
+        )
+
+    def process_queued_candidate(
+        self,
+        *,
+        mission_id: str,
+    ) -> CodeChangeResult:
+        mission = self.mission_service.get_mission(
+            mission_id
+        )
+
+        if (
+            mission.owner_agent != "developer"
+            or mission.source != "hq_chat_code_change"
+        ):
+            raise ValueError(
+                "mission is not a queued HQ code change"
+            )
+
+        objectives = mission.objectives or []
+
+        if not objectives:
+            raise ValueError(
+                "queued code change has no repository"
+            )
+
+        repository = self._trusted_repository(
+            objectives[0]
+        )
+
+        if mission.status is MissionStatus.QUEUED:
+            self.mission_service.transition(
+                mission.id,
+                MissionStatus.RUNNING,
+            )
+        elif mission.status is not MissionStatus.RUNNING:
+            raise ValueError(
+                "queued code change is not runnable"
+            )
+
+        try:
+            result = self._run_existing_mission(
+                mission_id=mission.id,
+                repository=repository,
+            )
+
+            target = (
+                MissionStatus.WAITING_APPROVAL
+                if result.ready_for_approval
+                else MissionStatus.COMPLETED
+            )
+
+            self.mission_service.transition(
+                mission.id,
+                target,
+                result={
+                    "repository": repository,
+                    "change_ref": result.change_ref,
+                    "ready_for_approval": (
+                        result.ready_for_approval
+                    ),
+                },
+            )
+
+            return result
+
+        except Exception as exc:
+            current = self.mission_service.get_mission(
+                mission.id
+            )
+
+            if current.status is MissionStatus.RUNNING:
+                self.mission_service.transition(
+                    mission.id,
+                    MissionStatus.FAILED,
+                    error_state={
+                        "code": (
+                            "code_change_preparation_failed"
+                        ),
+                        "message": str(exc)[:500],
+                    },
+                )
+
+            raise
+
+    def candidate_result(
+        self,
+        *,
+        mission_id: str,
+    ) -> CodeChangeResult:
+        mission = self.mission_service.get_mission(
+            mission_id
+        )
+
+        if (
+            mission.owner_agent != "developer"
+            or mission.source != "hq_chat_code_change"
+        ):
+            raise ValueError(
+                "mission is not an HQ code change"
+            )
+
+        objectives = mission.objectives or []
+
+        if not objectives:
+            raise ValueError(
+                "code-change mission has no repository"
+            )
+
+        repository = self._trusted_repository(
+            objectives[0]
+        )
+
+        return self._result_for_mission(
+            mission_id=mission.id,
+            repository=repository,
+        )
+
     def prepare_candidate(
         self,
         *,
@@ -112,52 +267,81 @@ class CodeChangeService:
             dependencies=[],
         )
 
+        return self._run_existing_mission(
+            mission_id=mission.id,
+            repository=repository,
+        )
+
+
+
+    def _run_existing_mission(
+        self,
+        *,
+        mission_id: str,
+        repository: str,
+    ) -> CodeChangeResult:
         runner = self.runner_factory(repository)
 
         runner.run_developer(
-            mission_id=mission.id,
+            mission_id=mission_id,
         )
 
-        developer_delivery = self.delivery_service.get_delivery(
-            mission.id
+        developer_delivery = (
+            self.delivery_service.get_delivery(
+                mission_id
+            )
         )
 
         runner.run_qa(
             developer_delivery
         )
 
-        final_delivery = self.delivery_service.get_delivery(
-            mission.id
+        return self._result_for_mission(
+            mission_id=mission_id,
+            repository=repository,
+        )
+
+    def _result_for_mission(
+        self,
+        *,
+        mission_id: str,
+        repository: str,
+    ) -> CodeChangeResult:
+        final_delivery = (
+            self.delivery_service.get_delivery(
+                mission_id
+            )
         )
 
         changed_files = tuple(
             final_delivery.changed_files or []
         )
 
-        qa_evidence = dict(
-            final_delivery.qa_evidence or {}
-        )
-
-        ready_for_approval = (
+        ready = (
             final_delivery.qa_result is QAResult.PASSED
-            and bool(final_delivery.approval_reference)
+            and bool(
+                final_delivery.approval_reference
+            )
         )
 
         return CodeChangeResult(
-            mission_id=mission.id,
+            mission_id=mission_id,
             repository=repository,
             summary=final_delivery.summary,
             change_ref=final_delivery.change_ref,
             changed_files=changed_files,
             developer_evidence=dict(
-                final_delivery.developer_evidence or {}
+                final_delivery.developer_evidence
+                or {}
             ),
             qa_result=final_delivery.qa_result,
-            qa_evidence=qa_evidence,
+            qa_evidence=dict(
+                final_delivery.qa_evidence or {}
+            ),
             approval_reference=(
                 final_delivery.approval_reference
             ),
-            ready_for_approval=ready_for_approval,
+            ready_for_approval=ready,
             high_risk=self._high_risk(
                 repository=repository,
                 changed_files=changed_files,

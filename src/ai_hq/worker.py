@@ -1,5 +1,7 @@
 import time
 
+from ai_hq.code_changes.runtime import build_code_change_service
+from ai_hq.code_changes.worker import CodeChangeQueueRunner
 from ai_hq.agents.registry import AgentRegistry
 from ai_hq.chat.model_client import build_chat_model_client
 from ai_hq.config import OperatingMode, Settings, get_settings
@@ -111,6 +113,53 @@ def _build_verified_delivery_runner(
     )
 
 
+def build_code_change_queue_runner(
+    settings: Settings,
+    *,
+    session_factory=None,
+) -> CodeChangeQueueRunner | None:
+    required = (
+        getattr(
+            settings,
+            "repository_sandbox_root_path",
+            None,
+        ),
+        getattr(
+            settings,
+            "ai_hq_repository_source_path",
+            None,
+        ),
+        getattr(
+            settings,
+            "dripvid_repository_source_path",
+            None,
+        ),
+    )
+
+    if any(value is None for value in required):
+        return None
+
+    if session_factory is None:
+        session_factory = get_session_factory()
+
+    ensure_system_state(session_factory)
+
+    service = build_code_change_service(
+        settings=settings,
+        session_factory=session_factory,
+        model_client=build_chat_model_client(
+            settings
+        ),
+    )
+
+    if service is None:
+        return None
+
+    return CodeChangeQueueRunner(
+        code_change_service=service
+    )
+
+
 def build_autonomous_mission_runner(
     settings: Settings,
     *,
@@ -192,6 +241,7 @@ def run_worker_iteration(
     *,
     autonomous_runner: AutonomousMissionRunner,
     department_runner: DepartmentRunner,
+    code_change_runner: CodeChangeQueueRunner | None = None,
     recovery_coordinator: RecoveryWorkerCoordinator | None = None,
     settings: Settings | None = None,
 ) -> bool:
@@ -211,6 +261,11 @@ def run_worker_iteration(
             recovery_coordinator.handle_execution_result(autonomous_result)
         return True
 
+    if code_change_runner is not None:
+        result = code_change_runner.run_once()
+        if result is not None:
+            return True
+
     if department_runner.run_once():
         return True
 
@@ -225,6 +280,7 @@ def run_worker() -> int:
 
     autonomous_runner = None
     department_runner = None
+    code_change_runner = None
     recovery_coordinator = None
     recovery_initialized = False
 
@@ -241,6 +297,13 @@ def run_worker() -> int:
         if department_runner is None:
             department_runner = build_department_runner(settings)
 
+        if code_change_runner is None:
+            code_change_runner = (
+                build_code_change_queue_runner(
+                    settings
+                )
+            )
+
         if not recovery_initialized:
             recovery_coordinator = build_recovery_coordinator(settings)
             recovery_initialized = True
@@ -248,6 +311,7 @@ def run_worker() -> int:
         worked = run_worker_iteration(
             autonomous_runner=autonomous_runner,
             department_runner=department_runner,
+            code_change_runner=code_change_runner,
             recovery_coordinator=recovery_coordinator,
             settings=settings,
         )
