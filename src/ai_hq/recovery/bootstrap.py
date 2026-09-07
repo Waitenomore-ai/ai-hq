@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from ai_hq.config import OperatingMode, Settings
@@ -23,6 +25,21 @@ from ai_hq.system_state import ensure_system_state
 
 
 MonotonicClock = Callable[[], float]
+logger = logging.getLogger("ai_hq.recovery")
+
+
+def _log_bool(value: Any) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "unknown"
+
+
+def _log_status_code(value: Any) -> str:
+    if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+        return str(value)
+    return "unknown"
 
 
 class ReadinessProbe(Protocol):
@@ -69,6 +86,7 @@ class DripVidRecoveryCycle:
         self.observer = observer
         self.probe = probe
         self.diagnostics = diagnostics
+        self.last_summary: dict[str, bool | int | None] | None = None
 
     @staticmethod
     def _state(status: Mapping[str, Any] | None) -> str | None:
@@ -133,12 +151,38 @@ class DripVidRecoveryCycle:
                 statuses[component] = None
         return statuses
 
+    def _record_summary(
+        self,
+        readiness: Mapping[str, Any],
+        *,
+        incident_detected: bool,
+        incident_resolved: bool,
+        worked: bool,
+    ) -> None:
+        status_code = readiness.get("status_code")
+        self.last_summary = {
+            "reachable": readiness.get("reachable") if isinstance(readiness.get("reachable"), bool) else None,
+            "status_code": (
+                status_code
+                if isinstance(status_code, int)
+                and not isinstance(status_code, bool)
+                and 100 <= status_code <= 599
+                else None
+            ),
+            "ready": readiness.get("ok") if isinstance(readiness.get("ok"), bool) else None,
+            "incident_detected": incident_detected,
+            "incident_resolved": incident_resolved,
+            "worked": worked,
+        }
+
     def run_once(self, *, observe_only: bool) -> bool:
         readiness = self.probe.probe()
         statuses = self._status_snapshot()
         previous_observe_only = self.observer.observe_only
         self.observer.observe_only = observe_only
         worked = False
+        incident_detected = False
+        incident_resolved = False
 
         try:
             if self._storage_critical(readiness):
@@ -146,12 +190,20 @@ class DripVidRecoveryCycle:
                     "app",
                     diagnostics={"readiness": readiness},
                 )
+                incident_detected = True
+                worked = True
                 if incident.consecutive_failures >= self.observer.failure_threshold:
                     self.observer.handle_policy_escalation(
                         incident.id,
                         readiness=readiness,
                         service_state=self._state(statuses.get("app")),
                     )
+                self._record_summary(
+                    readiness,
+                    incident_detected=incident_detected,
+                    incident_resolved=incident_resolved,
+                    worked=worked,
+                )
                 return True
 
             for component in RECOVERY_COMPONENTS:
@@ -163,11 +215,11 @@ class DripVidRecoveryCycle:
                     and incident.state is RecoveryIncidentState.VERIFYING
                     and status is not None
                 ):
-                    self.observer.verify_recovery(
+                    incident_resolved = self.observer.verify_recovery(
                         incident.id,
                         readiness=readiness,
                         service_state=self._state(status),
-                    )
+                    ) or incident_resolved
                     worked = True
                     continue
 
@@ -184,6 +236,7 @@ class DripVidRecoveryCycle:
                                 "service_state": self._state(status),
                             },
                         )
+                        incident_resolved = True
                         worked = True
                     continue
 
@@ -198,6 +251,7 @@ class DripVidRecoveryCycle:
                     component,
                     diagnostics={"readiness": readiness},
                 )
+                incident_detected = True
                 worked = True
 
                 if incident.consecutive_failures < self.observer.failure_threshold:
@@ -228,6 +282,12 @@ class DripVidRecoveryCycle:
                     service_state=self._state(status),
                 )
 
+            self._record_summary(
+                readiness,
+                incident_detected=incident_detected,
+                incident_resolved=incident_resolved,
+                worked=worked,
+            )
             return worked
         finally:
             self.observer.observe_only = previous_observe_only
@@ -278,11 +338,36 @@ class RecoveryWorkerCoordinator:
             return False
 
         self._last_run = now
-        return bool(
-            self.cycle.run_once(
-                observe_only=settings.recovery_observe_only,
+        try:
+            worked = bool(
+                self.cycle.run_once(
+                    observe_only=settings.recovery_observe_only,
+                )
             )
+        except Exception:
+            logger.error(
+                "recovery_cycle_failed timestamp=%s observe_only=%s",
+                datetime.now(UTC).isoformat(),
+                _log_bool(settings.recovery_observe_only),
+            )
+            raise
+
+        summary = getattr(self.cycle, "last_summary", None)
+        if not isinstance(summary, Mapping):
+            summary = {}
+        logger.info(
+            "recovery_cycle timestamp=%s observe_only=%s reachable=%s status_code=%s "
+            "ready=%s incident_detected=%s incident_resolved=%s worked=%s",
+            datetime.now(UTC).isoformat(),
+            _log_bool(settings.recovery_observe_only),
+            _log_bool(summary.get("reachable")),
+            _log_status_code(summary.get("status_code")),
+            _log_bool(summary.get("ready")),
+            _log_bool(summary.get("incident_detected")),
+            _log_bool(summary.get("incident_resolved")),
+            _log_bool(worked),
         )
+        return worked
 
     def handle_execution_result(self, result) -> None:
         self.cycle.handle_execution_result(result)
