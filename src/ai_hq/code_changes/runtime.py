@@ -83,7 +83,7 @@ def build_code_change_service(
         (
             build_ai_hq_repository_profile(
                 source_path=ai_hq_source,
-                base_ref="HEAD",
+                base_ref="main",
             ),
             build_dripvid_repository_profile(
                 source_path=dripvid_source,
