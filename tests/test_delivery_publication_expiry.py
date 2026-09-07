@@ -60,6 +60,13 @@ def test_record_publication_rejects_approved_but_expired_approval():
         db.commit()
 
     with pytest.raises(ValueError, match="expired|approval"):
+        deliveries.apply_human_decision(
+            mission_id=mission.id,
+            approval_reference=waiting.approval_reference,
+            change_ref=CHANGE_REF,
+        )
+
+    with pytest.raises(ValueError, match="expired|approval"):
         deliveries.record_publication(
             mission_id=mission.id,
             change_ref=CHANGE_REF,
