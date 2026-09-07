@@ -201,6 +201,17 @@ class RepositoryWorkspaceService(Protocol):
     ) -> CandidateSnapshot:
         ...
 
+    def review_diff(
+        self,
+        *,
+        workspace: RepositoryWorkspace,
+    ) -> str:
+        """
+        Return the complete machine-derived review diff for
+        the current immutable candidate snapshot.
+        """
+        ...
+
     def run_tests(
         self,
         *,

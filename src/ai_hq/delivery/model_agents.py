@@ -72,6 +72,13 @@ shell, host-helper, service-management, Docker, or infrastructure authority.
 
 The Developer change_ref is immutable. Review only that exact reference.
 
+developer_evidence.candidate_diff is the machine-derived unified diff produced
+by the trusted isolated repository sandbox. You must inspect that actual diff,
+not merely the Developer summary or filenames. The associated diff/content
+digests and test evidence bind the review to the verified candidate. If changed
+files are present but a machine-derived candidate_diff is unavailable, the
+candidate must not be approved.
+
 Return ONLY a valid JSON object with exactly these fields:
 
 {

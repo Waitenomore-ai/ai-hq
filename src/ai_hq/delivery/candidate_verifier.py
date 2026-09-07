@@ -33,6 +33,7 @@ class CandidateVerifier:
         proposal: Mapping[str, Any],
         snapshot: CandidateSnapshot,
         test_evidence: TestEvidence,
+        candidate_diff: str | None = None,
     ) -> VerifiedCandidate:
         if not isinstance(proposal, Mapping):
             raise TypeError("proposal must be a mapping")
@@ -62,6 +63,35 @@ class CandidateVerifier:
         digest = hashlib.sha256(canonical).hexdigest()
         change_ref = f"sha256:{digest}"
 
+        if candidate_diff is not None:
+            if not isinstance(
+                candidate_diff,
+                str,
+            ):
+                raise TypeError(
+                    "candidate_diff must be text"
+                )
+
+            if (
+                snapshot.changed_files
+                and not candidate_diff
+            ):
+                raise ValueError(
+                    "changed candidate requires "
+                    "machine-derived review diff"
+                )
+
+            candidate_diff_digest = (
+                "sha256:"
+                + hashlib.sha256(
+                    candidate_diff.encode(
+                        "utf-8"
+                    )
+                ).hexdigest()
+            )
+        else:
+            candidate_diff_digest = None
+
         evidence = {
             "verification": "candidate_identity_verified",
             "algorithm": "sha256",
@@ -78,6 +108,14 @@ class CandidateVerifier:
                 "evidence_digest": test_evidence.evidence_digest,
             },
         }
+
+        if candidate_diff is not None:
+            evidence["candidate_diff"] = (
+                candidate_diff
+            )
+            evidence[
+                "candidate_diff_digest"
+            ] = candidate_diff_digest
 
         return VerifiedCandidate(
             mission_id=mission_id.strip(),

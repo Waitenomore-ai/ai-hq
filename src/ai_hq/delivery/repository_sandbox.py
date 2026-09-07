@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ from ai_hq.delivery.repository_workspace import (
 _CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 _MAX_EVIDENCE_SUMMARY = 4000
 _MAX_OUTPUT_PER_STREAM = 1800
+_MAX_CANDIDATE_REVIEW_DIFF = 24_000
 
 
 @dataclass
@@ -33,6 +35,7 @@ class _WorkspaceState:
     profile: RepositoryProfile
     base_manifest: dict[str, str]
     snapshot_fingerprint: str | None = None
+    candidate_review_diff: str | None = None
 
 
 class IsolatedRepositorySandbox:
@@ -87,22 +90,77 @@ class IsolatedRepositorySandbox:
         if not isinstance(changes, tuple):
             raise TypeError("changes must be a tuple")
 
+        before: dict[str, str | None] = {}
+
         for change in changes:
             if not isinstance(change, FileChange):
-                raise TypeError("changes must contain FileChange values")
-            target = self._safe_target(state.path, change.path)
+                raise TypeError(
+                    "changes must contain FileChange values"
+                )
+
+            target = self._safe_target(
+                state.path,
+                change.path,
+            )
+
+            if change.path not in before:
+                before[change.path] = (
+                    self._review_text(target)
+                )
+
+        for change in changes:
+            target = self._safe_target(
+                state.path,
+                change.path,
+            )
+
             if change.operation is FileOperation.WRITE:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(change.content or "", encoding="utf-8")
+                target.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+                target.write_text(
+                    change.content or "",
+                    encoding="utf-8",
+                )
+
             elif change.operation is FileOperation.DELETE:
                 if target.exists():
-                    if not target.is_file() or target.is_symlink():
-                        raise ValueError("delete target must be a regular workspace file")
+                    if (
+                        not target.is_file()
+                        or target.is_symlink()
+                    ):
+                        raise ValueError(
+                            "delete target must be a "
+                            "regular workspace file"
+                        )
                     target.unlink()
-            else:
-                raise ValueError("unsupported repository file operation")
 
-        return self.snapshot(workspace=workspace)
+            else:
+                raise ValueError(
+                    "unsupported repository file operation"
+                )
+
+        after = {
+            relative: self._review_text(
+                self._safe_target(
+                    state.path,
+                    relative,
+                )
+            )
+            for relative in before
+        }
+
+        state.candidate_review_diff = (
+            self._build_review_diff(
+                before=before,
+                after=after,
+            )
+        )
+
+        return self.snapshot(
+            workspace=workspace
+        )
 
     def snapshot(
         self,
@@ -136,6 +194,23 @@ class IsolatedRepositorySandbox:
             diff_digest=self._canonical_digest(diff_material),
             content_digest=content_digest,
         )
+
+    def review_diff(
+        self,
+        *,
+        workspace: RepositoryWorkspace,
+    ) -> str:
+        state = self._state_for(workspace)
+
+        self._require_current_snapshot(state)
+
+        if state.candidate_review_diff is None:
+            raise RuntimeError(
+                "candidate review diff is required "
+                "before QA"
+            )
+
+        return state.candidate_review_diff
 
     def run_tests(
         self,
@@ -204,6 +279,102 @@ class IsolatedRepositorySandbox:
         current_fingerprint = self._canonical_digest(self._manifest(state.path))
         if current_fingerprint != state.snapshot_fingerprint:
             raise RuntimeError("repository workspace snapshot is stale")
+
+    @staticmethod
+    def _review_text(
+        path: Path,
+    ) -> str | None:
+        if not path.exists():
+            return None
+
+        if (
+            not path.is_file()
+            or path.is_symlink()
+        ):
+            raise ValueError(
+                "candidate review diff requires "
+                "regular files"
+            )
+
+        try:
+            return path.read_text(
+                encoding="utf-8"
+            )
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                "candidate review diff requires "
+                "UTF-8 text files"
+            ) from exc
+
+    @staticmethod
+    def _build_review_diff(
+        *,
+        before: dict[str, str | None],
+        after: dict[str, str | None],
+    ) -> str:
+        sections: list[str] = []
+
+        for relative in sorted(before):
+            old = before[relative]
+            new = after[relative]
+
+            if old == new:
+                continue
+
+            old_lines = (
+                []
+                if old is None
+                else old.splitlines(
+                    keepends=True
+                )
+            )
+
+            new_lines = (
+                []
+                if new is None
+                else new.splitlines(
+                    keepends=True
+                )
+            )
+
+            fromfile = (
+                "/dev/null"
+                if old is None
+                else f"a/{relative}"
+            )
+
+            tofile = (
+                "/dev/null"
+                if new is None
+                else f"b/{relative}"
+            )
+
+            section = "".join(
+                difflib.unified_diff(
+                    old_lines,
+                    new_lines,
+                    fromfile=fromfile,
+                    tofile=tofile,
+                    lineterm="\n",
+                )
+            )
+
+            sections.append(section)
+
+        review_diff = "".join(
+            sections
+        )
+
+        if (
+            len(review_diff)
+            > _MAX_CANDIDATE_REVIEW_DIFF
+        ):
+            raise ValueError(
+                "candidate review diff exceeds "
+                "maximum safe review size"
+            )
+
+        return review_diff
 
     @staticmethod
     def _run_profile_command(

@@ -126,13 +126,25 @@ class DeliveryAgentRunner:
             workspace=workspace,
             changes=changes,
         )
-        test_evidence = self.workspace_service.run_tests(workspace=workspace)
+
+        candidate_diff = (
+            self.workspace_service.review_diff(
+                workspace=workspace,
+            )
+        )
+
+        test_evidence = (
+            self.workspace_service.run_tests(
+                workspace=workspace
+            )
+        )
 
         verified = self.candidate_verifier.verify(
             mission_id=mission_id,
             proposal=candidate,
             snapshot=snapshot,
             test_evidence=test_evidence,
+            candidate_diff=candidate_diff,
         )
 
         self.runtime.handoff_to_developer(

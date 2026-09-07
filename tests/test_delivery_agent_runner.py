@@ -151,6 +151,17 @@ class FakeWorkspaceService:
     def snapshot(self, *, workspace):
         raise AssertionError("runner must use apply_changes snapshot directly")
 
+    def review_diff(self, *, workspace):
+        self.calls.append(
+            ("review_diff", workspace.workspace_id)
+        )
+        return (
+            "--- a/src/real.py\n"
+            "+++ b/src/real.py\n"
+            "-VALUE = 1\n"
+            "+VALUE = 2\n"
+        )
+
     def run_tests(self, *, workspace):
         self.calls.append(("run_tests", workspace.workspace_id))
         if self.fail_at == "run_tests":
@@ -234,6 +245,7 @@ def test_developer_stage_applies_typed_changes_and_uses_machine_snapshot():
     assert workspace_service.calls == [
         ("prepare", "mission-1"),
         ("apply_changes", "workspace-1", expected_file_changes()),
+        ("review_diff", "workspace-1"),
         ("run_tests", "workspace-1"),
     ]
 
@@ -249,6 +261,18 @@ def test_developer_stage_applies_typed_changes_and_uses_machine_snapshot():
         "evidence_digest": "sha256:" + ("c" * 64),
     }
     assert "source" not in call["evidence"]
+    assert (
+        call["evidence"]["candidate_diff"]
+        == (
+            "--- a/src/real.py\n"
+            "+++ b/src/real.py\n"
+            "-VALUE = 1\n"
+            "+VALUE = 2\n"
+        )
+    )
+    assert call["evidence"][
+        "candidate_diff_digest"
+    ].startswith("sha256:")
 
 
 def test_invalid_developer_change_fails_before_workspace_mutation():
