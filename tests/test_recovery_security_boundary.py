@@ -9,6 +9,14 @@ from ai_hq.host_helper.server import _default_allow_lists
 RECOVERY_PACKAGE = Path("src/ai_hq/recovery")
 RECOVERY_BOOTSTRAP = RECOVERY_PACKAGE / "bootstrap.py"
 WORKER = Path("src/ai_hq/worker.py")
+OBSERVABILITY_SOURCES = (
+    RECOVERY_PACKAGE / "status.py",
+    Path("src/ai_hq/hq/state.py"),
+    Path("src/ai_hq/hq/api.py"),
+    Path("src/ai_hq/static/hq.js"),
+    Path("src/ai_hq/static/recovery.css"),
+    Path("src/ai_hq/templates/home.html"),
+)
 
 
 def _tree(path: Path) -> ast.AST:
@@ -140,3 +148,31 @@ def test_production_recovery_bootstrap_does_not_use_container_local_http_probe()
     assert "DripVidReadinessProbe" not in calls
     assert "recovery_dripvid_ready_url" not in source
     assert "HostHelperDripVidReadinessProbe" in calls
+
+
+def test_recovery_observability_surface_has_no_mutation_authority():
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in OBSERVABILITY_SOURCES
+    ).casefold()
+
+    for forbidden in (
+        "subprocess",
+        "os.system",
+        "service.recover",
+        "service_restart",
+        "systemctl",
+        "hosthelperoperationaltransport",
+        "servicerecoveradapter",
+        "deployment_deploy",
+        "deployment_rollback",
+    ):
+        assert forbidden not in source
+
+    home = Path("src/ai_hq/templates/home.html").read_text(encoding="utf-8")
+    start = home.index("data-recovery-card")
+    end = home.index("</section>", start)
+    card = home[start:end].casefold()
+    assert "<button" not in card
+    assert "<form" not in card
+    assert "data-action" not in card

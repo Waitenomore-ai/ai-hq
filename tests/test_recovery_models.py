@@ -232,6 +232,34 @@ def test_recovery_tables_have_required_persistence_fields():
     }.issubset(attempt_columns)
 
 
+def test_recovery_status_defaults_are_bounded_and_unknown():
+    models = load_models()
+    row = models.RecoveryStatus(target="dripvid")
+
+    assert row.last_result.value == "unknown"
+    assert row.consecutive_failures == 0
+    assert row.reachable is None
+    assert row.status_code is None
+    assert row.ready is None
+    assert row.active_incident_id is None
+    assert row.active_incident_state is None
+
+    columns = set(row.__table__.columns.keys())
+    assert columns == {
+        "target",
+        "last_probe_at",
+        "last_result",
+        "reachable",
+        "status_code",
+        "ready",
+        "consecutive_failures",
+        "active_incident_id",
+        "active_incident_state",
+        "updated_at",
+    }
+    assert {"details", "diagnostics", "readiness", "error_text"}.isdisjoint(columns)
+
+
 def test_recovery_migration_has_expected_revision_chain():
     migration = Path(
         "migrations/versions/0014_recovery_incidents.py"

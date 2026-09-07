@@ -21,6 +21,7 @@ from ai_hq.recovery.probe import (
     recovery_diagnostic_targets,
 )
 from ai_hq.recovery.service import RecoveryService
+from ai_hq.recovery.status import RecoveryStatusService
 from ai_hq.system_state import ensure_system_state
 
 
@@ -44,6 +45,23 @@ def _log_status_code(value: Any) -> str:
 
 class ReadinessProbe(Protocol):
     def probe(self) -> dict[str, Any]: ...
+
+
+class RecoveryStatusRecorder(Protocol):
+    def record_successful_cycle(
+        self,
+        *,
+        target: str,
+        observed_at: datetime,
+        summary: Mapping[str, Any],
+    ) -> dict: ...
+
+    def record_cycle_error(
+        self,
+        *,
+        target: str,
+        observed_at: datetime,
+    ) -> dict: ...
 
 
 class RecoveryDiagnosticsReader:
@@ -319,10 +337,39 @@ class RecoveryWorkerCoordinator:
         cycle: DripVidRecoveryCycle,
         *,
         clock: MonotonicClock = time.monotonic,
+        status_recorder: RecoveryStatusRecorder | None = None,
     ) -> None:
         self.cycle = cycle
         self.clock = clock
+        self.status_recorder = status_recorder
         self._last_run: float | None = None
+
+    def _record_cycle_error(self, observed_at: datetime) -> None:
+        if self.status_recorder is None:
+            return
+        try:
+            self.status_recorder.record_cycle_error(
+                target="dripvid",
+                observed_at=observed_at,
+            )
+        except Exception:
+            logger.error("recovery_status_persist_failed phase=error")
+
+    def _record_cycle_success(
+        self,
+        observed_at: datetime,
+        summary: Mapping[str, Any],
+    ) -> None:
+        if self.status_recorder is None:
+            return
+        try:
+            self.status_recorder.record_successful_cycle(
+                target="dripvid",
+                observed_at=observed_at,
+                summary=summary,
+            )
+        except Exception:
+            logger.error("recovery_status_persist_failed phase=success")
 
     def run_if_due(self, settings: Settings) -> bool:
         if not getattr(settings, "recovery_enabled", False):
@@ -338,6 +385,7 @@ class RecoveryWorkerCoordinator:
             return False
 
         self._last_run = now
+        observed_at = datetime.now(UTC)
         try:
             worked = bool(
                 self.cycle.run_once(
@@ -347,9 +395,10 @@ class RecoveryWorkerCoordinator:
         except Exception:
             logger.error(
                 "recovery_cycle_failed timestamp=%s observe_only=%s",
-                datetime.now(UTC).isoformat(),
+                observed_at.isoformat(),
                 _log_bool(settings.recovery_observe_only),
             )
+            self._record_cycle_error(observed_at)
             raise
 
         summary = getattr(self.cycle, "last_summary", None)
@@ -358,7 +407,7 @@ class RecoveryWorkerCoordinator:
         logger.info(
             "recovery_cycle timestamp=%s observe_only=%s reachable=%s status_code=%s "
             "ready=%s incident_detected=%s incident_resolved=%s worked=%s",
-            datetime.now(UTC).isoformat(),
+            observed_at.isoformat(),
             _log_bool(settings.recovery_observe_only),
             _log_bool(summary.get("reachable")),
             _log_status_code(summary.get("status_code")),
@@ -367,6 +416,7 @@ class RecoveryWorkerCoordinator:
             _log_bool(summary.get("incident_resolved")),
             _log_bool(worked),
         )
+        self._record_cycle_success(observed_at, summary)
         return worked
 
     def handle_execution_result(self, result) -> None:
@@ -419,4 +469,9 @@ def build_recovery_coordinator(
         probe,
         diagnostics,
     )
-    return RecoveryWorkerCoordinator(cycle, clock=clock)
+    status = RecoveryStatusService(session_factory)
+    return RecoveryWorkerCoordinator(
+        cycle,
+        clock=clock,
+        status_recorder=status,
+    )
