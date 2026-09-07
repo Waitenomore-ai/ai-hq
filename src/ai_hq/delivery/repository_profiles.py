@@ -81,3 +81,22 @@ def build_ai_hq_repository_profile(
             (sys.executable, "-m", "pytest", "-q"),
         ),
     )
+
+
+def build_dripvid_repository_profile(
+    *,
+    source_path: Path,
+    base_ref: str = "main",
+) -> RepositoryProfile:
+    """Build the fixed trusted verification profile for DripVid."""
+
+    return RepositoryProfile(
+        key="dripvid",
+        source_path=source_path,
+        base_ref=base_ref,
+        test_commands=(
+            ("npm", "run", "check"),
+            ("npm", "test"),
+        ),
+        test_timeout_seconds=180.0,
+    )
