@@ -29,6 +29,24 @@ def test_deploy_script_validates_exact_sha_archive_contract():
     assert "unexpected archive path" in text
 
 
+def test_deploy_script_never_rolls_back_across_a_database_revision_change():
+    text = Path("deploy/ai-hq-deploy").read_text()
+
+    assert "database_revision()" in text
+    assert "DB_REVISION_BEFORE=" in text
+    assert "DB_REVISION_AFTER=" in text
+    assert '[[ "$DB_REVISION_AFTER" == "$DB_REVISION_BEFORE" ]]' in text
+    assert "database revision changed during deployment" in text
+    assert "automatic rollback is unsafe" in text
+
+
+def test_deploy_script_fails_closed_when_database_revision_cannot_be_verified():
+    text = Path("deploy/ai-hq-deploy").read_text()
+
+    assert "database revision could not be verified after readiness failure" in text
+    assert "refusing automatic rollback" in text
+
+
 def test_production_check_covers_dripvid_and_ai_hq_without_secrets():
     text = Path("deploy/check-production.sh").read_text()
     assert "https://dripvid.uk/" in text
