@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+import re
 
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,8 @@ from ai_hq.missions.models import Mission, MissionStatus
 
 
 SessionFactory = Callable[[], Session]
+_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_PUBLISH_BRANCH_PREFIX = "ai-hq/candidate/"
 
 
 class DeliveryService:
@@ -74,9 +77,6 @@ class DeliveryService:
                     "mission already has a developer proposal"
                 )
 
-            # Developer work has begun.
-            # Preserve the existing Mission transition rules:
-            # QUEUED -> RUNNING -> WAITING_APPROVAL.
             if mission.status is MissionStatus.QUEUED:
                 mission.status = MissionStatus.RUNNING
 
@@ -135,8 +135,6 @@ class DeliveryService:
                     "delivery is not awaiting QA"
                 )
 
-            # Critical immutable boundary:
-            # QA may only assess the exact change Developer submitted.
             if delivery.change_ref != change_ref:
                 raise ValueError(
                     "change_ref does not match developer proposal"
@@ -146,8 +144,6 @@ class DeliveryService:
             delivery.qa_evidence = dict(evidence)
 
             if qa_result is QAResult.FAILED:
-                # Return to Developer.
-                # Human approval is never created for failed QA.
                 delivery.stage = DeliveryStage.DEVELOPER
                 delivery.approval_reference = None
 
@@ -157,8 +153,6 @@ class DeliveryService:
                         "mission must be RUNNING before approval"
                     )
 
-                # Create a real persisted human approval request bound to
-                # the exact immutable Developer proposal that QA passed.
                 approval = ApprovalService(self.session_factory).create_request(
                     mission_id=mission.id,
                     requester_agent="qa",
@@ -177,11 +171,8 @@ class DeliveryService:
                     expires_at=datetime.now(UTC) + timedelta(hours=24),
                 )
 
-                # Bind Delivery to the real ApprovalRequest.
                 delivery.stage = DeliveryStage.WAITING_APPROVAL
                 delivery.approval_reference = approval.id
-
-                # Existing mission state machine destination.
                 mission.status = MissionStatus.WAITING_APPROVAL
 
                 refs = list(mission.approval_references or [])
@@ -196,6 +187,78 @@ class DeliveryService:
             db.commit()
             db.refresh(delivery)
 
+            return delivery
+
+    def record_publication(
+        self,
+        *,
+        mission_id: str,
+        change_ref: str,
+        branch_name: str,
+        commit_sha: str,
+        tree_sha: str,
+    ) -> Delivery:
+        if not isinstance(branch_name, str) or not branch_name.startswith(
+            _PUBLISH_BRANCH_PREFIX
+        ):
+            raise ValueError("publication branch must use generated candidate namespace")
+        if not isinstance(commit_sha, str) or not _GIT_SHA_RE.fullmatch(commit_sha):
+            raise ValueError("publication commit must be a Git SHA")
+        if not isinstance(tree_sha, str) or not _GIT_SHA_RE.fullmatch(tree_sha):
+            raise ValueError("publication tree must be a Git SHA")
+
+        approvals = ApprovalService(self.session_factory)
+
+        with self.session_factory() as db:
+            mission = db.get(Mission, mission_id)
+            if mission is None:
+                raise KeyError(f"mission not found: {mission_id}")
+
+            delivery = (
+                db.query(Delivery)
+                .filter(Delivery.mission_id == mission_id)
+                .one_or_none()
+            )
+            if delivery is None:
+                raise KeyError(f"delivery not found for mission: {mission_id}")
+
+            if delivery.change_ref != change_ref:
+                raise ValueError("change_ref does not match publication candidate")
+            if delivery.stage is not DeliveryStage.WAITING_APPROVAL:
+                raise ValueError("delivery is not waiting for publication approval")
+            if delivery.qa_result is not QAResult.PASSED:
+                raise ValueError("QA must pass before publication")
+            if not delivery.approval_reference:
+                raise ValueError("publication requires human approval")
+
+            approval = approvals.get_request(delivery.approval_reference)
+            if approval.mission_id != mission_id:
+                raise ValueError("approval mission does not match publication")
+            if approval.target != change_ref:
+                raise ValueError("approval target does not match change_ref")
+            if (approval.action_plan or {}).get("change_ref") != change_ref:
+                raise ValueError("approval action plan does not match change_ref")
+            if approval.state is not ApprovalState.APPROVED:
+                raise ValueError("publication requires approved human approval")
+
+            existing = (
+                delivery.published_branch,
+                delivery.published_commit,
+                delivery.published_tree,
+            )
+            requested = (branch_name, commit_sha, tree_sha)
+            if any(value is not None for value in existing):
+                if existing != requested or delivery.published_at is None:
+                    raise ValueError("publication identity does not match persisted publication")
+                return delivery
+
+            delivery.published_branch = branch_name
+            delivery.published_commit = commit_sha
+            delivery.published_tree = tree_sha
+            delivery.published_at = datetime.now(UTC)
+
+            db.commit()
+            db.refresh(delivery)
             return delivery
 
     def apply_human_decision(
@@ -239,15 +302,11 @@ class DeliveryService:
                     "delivery is not waiting for human approval"
                 )
 
-            # Fail closed: the decision must refer to the exact persisted
-            # approval created for this delivery.
             if delivery.approval_reference != approval_reference:
                 raise ValueError(
                     "approval reference does not match delivery"
                 )
 
-            # Fail closed: approval cannot be replayed against another
-            # Developer proposal.
             if delivery.change_ref != change_ref:
                 raise ValueError(
                     "change_ref does not match approved proposal"
@@ -280,18 +339,12 @@ class DeliveryService:
                 )
 
             if approval.state is ApprovalState.APPROVED:
-                # Authorization only.
-                #
-                # A later controlled deployment stage must consume this
-                # exact approval/change reference. Do not deploy here.
                 return delivery
 
             if approval.state in {
                 ApprovalState.DENIED,
                 ApprovalState.CANCELLED,
             }:
-                # Human rejection/cancellation returns the exact proposal
-                # to Developer for revision.
                 delivery.stage = DeliveryStage.DEVELOPER
                 delivery.approval_reference = None
                 mission.status = MissionStatus.RUNNING
