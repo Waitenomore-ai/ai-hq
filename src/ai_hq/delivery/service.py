@@ -15,6 +15,13 @@ _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _PUBLISH_BRANCH_PREFIX = "ai-hq/candidate/"
 
 
+def _approval_expired(expires_at: datetime) -> bool:
+    boundary = expires_at
+    if boundary.tzinfo is None:
+        boundary = boundary.replace(tzinfo=UTC)
+    return boundary <= datetime.now(UTC)
+
+
 class DeliveryService:
     """
     Persisted handoff boundary:
@@ -238,6 +245,8 @@ class DeliveryService:
                 raise ValueError("approval target does not match change_ref")
             if (approval.action_plan or {}).get("change_ref") != change_ref:
                 raise ValueError("approval action plan does not match change_ref")
+            if _approval_expired(approval.expires_at):
+                raise ValueError("publication approval expired")
             if approval.state is not ApprovalState.APPROVED:
                 raise ValueError("publication requires approved human approval")
 
@@ -332,6 +341,9 @@ class DeliveryService:
                 raise ValueError(
                     "approval action plan does not match change_ref"
                 )
+
+            if _approval_expired(approval.expires_at):
+                raise ValueError("approval request expired")
 
             if approval.state is ApprovalState.PENDING:
                 raise ValueError(
