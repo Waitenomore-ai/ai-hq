@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 @dataclass(frozen=True)
@@ -12,6 +12,11 @@ class RepositoryProfile:
     base_ref: str
     test_commands: tuple[tuple[str, ...], ...]
     test_timeout_seconds: float = 90.0
+    copy_excludes: tuple[str, ...] = ()
+    shared_dependency_links: tuple[
+        tuple[str, Path],
+        ...
+    ] = ()
 
     def __post_init__(self) -> None:
         key = self.key.strip() if isinstance(self.key, str) else ""
@@ -38,6 +43,68 @@ class RepositoryProfile:
             raise TypeError("test_timeout_seconds must be numeric")
         if self.test_timeout_seconds <= 0:
             raise ValueError("test_timeout_seconds must be positive")
+
+        normalized_links: list[
+            tuple[str, Path]
+        ] = []
+
+        for relative, target in (
+            self.shared_dependency_links
+        ):
+            pure = PurePosixPath(relative)
+
+            if (
+                pure.is_absolute()
+                or not pure.parts
+                or any(
+                    part in {"", ".", ".."}
+                    for part in pure.parts
+                )
+            ):
+                raise ValueError(
+                    "shared dependency path "
+                    "must be normalized "
+                    "and relative"
+                )
+
+            dependency = (
+                Path(target)
+                .expanduser()
+                .resolve()
+            )
+
+            if not dependency.is_dir():
+                raise ValueError(
+                    "shared dependency target "
+                    "must be an existing "
+                    "directory"
+                )
+
+            normalized_links.append(
+                (
+                    pure.as_posix(),
+                    dependency,
+                )
+            )
+
+        for excluded in self.copy_excludes:
+            if (
+                not isinstance(excluded, str)
+                or not excluded
+                or "/" in excluded
+                or "\\" in excluded
+                or excluded in {".", ".."}
+            ):
+                raise ValueError(
+                    "copy excludes must be "
+                    "simple directory names"
+                )
+
+        object.__setattr__(
+            self,
+            "shared_dependency_links",
+            tuple(normalized_links),
+        )
 
         object.__setattr__(self, "key", key)
         object.__setattr__(self, "source_path", source)
@@ -90,13 +157,39 @@ def build_dripvid_repository_profile(
 ) -> RepositoryProfile:
     """Build the fixed trusted verification profile for DripVid."""
 
+    source = (
+        Path(source_path)
+        .expanduser()
+        .resolve()
+    )
+
+    node_modules = (
+        source / "node_modules"
+    )
+
+    if node_modules.is_dir():
+        copy_excludes = ("node_modules",)
+        shared_dependency_links = (
+            (
+                "node_modules",
+                node_modules,
+            ),
+        )
+    else:
+        copy_excludes = ()
+        shared_dependency_links = ()
+
     return RepositoryProfile(
         key="dripvid",
-        source_path=source_path,
+        source_path=source,
         base_ref=base_ref,
         test_commands=(
             ("npm", "run", "check"),
             ("npm", "test"),
         ),
         test_timeout_seconds=180.0,
+        copy_excludes=copy_excludes,
+        shared_dependency_links=(
+            shared_dependency_links
+        ),
     )

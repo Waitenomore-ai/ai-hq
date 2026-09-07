@@ -30,6 +30,16 @@ grep -Eq '^AI_HQ_SIMULATION_MODE=true$' "$ENV_FILE" || fail "AI HQ must deploy w
 grep -Eq '^AI_HQ_HOST_HELPER_CREDENTIAL=[A-Za-z0-9_-]{32,128}$' "$ENV_FILE" || fail "Host Helper credential is missing; run deploy/install-host-helper.sh first"
 test -S /run/ai-hq/host-helper.sock || fail "Host Helper socket is missing; run deploy/install-host-helper.sh first"
 
+grep -Fxq 'AI_HQ_REPOSITORY_MIRROR_ROOT=/srv/ai-hq/repository-mirrors' "$ENV_FILE" || fail "trusted repository mirror root is missing"
+grep -Fxq 'AI_HQ_REPOSITORY_SANDBOX_ROOT=/srv/ai-hq/repository-sandboxes' "$ENV_FILE" || fail "repository sandbox root is missing"
+grep -Fxq 'AI_HQ_AI_HQ_REPOSITORY_SOURCE=/srv/ai-hq/repository-mirrors/ai-hq' "$ENV_FILE" || fail "AI HQ trusted repository source is missing"
+grep -Fxq 'AI_HQ_DRIPVID_REPOSITORY_SOURCE=/srv/ai-hq/repository-mirrors/dripvid' "$ENV_FILE" || fail "DripVid trusted repository source is missing"
+
+test -d /opt/ai-hq/repository-mirrors/ai-hq || fail "AI HQ trusted repository mirror is missing"
+test -d /opt/ai-hq/repository-mirrors/dripvid || fail "DripVid trusted repository mirror is missing"
+test -d /opt/ai-hq/repository-mirrors/dripvid/node_modules || fail "DripVid trusted dependency cache is missing"
+test -d /opt/ai-hq/repository-sandboxes || fail "repository sandbox directory is missing"
+
 nginx -t >/dev/null
 
 exec 9>/run/lock/ai-hq-deploy.lock

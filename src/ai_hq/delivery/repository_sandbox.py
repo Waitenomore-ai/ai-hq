@@ -62,11 +62,38 @@ class IsolatedRepositorySandbox:
 
         workspace_id = str(uuid4())
         workspace_path = self._sandbox_root / workspace_id
+        ignore = None
+
+        if self._profile.copy_excludes:
+            ignore = shutil.ignore_patterns(
+                *self._profile.copy_excludes
+            )
+
         shutil.copytree(
             self._profile.source_path,
             workspace_path,
             symlinks=True,
+            ignore=ignore,
         )
+
+        for relative, dependency in (
+            self._profile.shared_dependency_links
+        ):
+            link = (
+                workspace_path
+                / PurePosixPath(relative)
+            )
+
+            link.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            link.symlink_to(
+                dependency,
+                target_is_directory=True,
+            )
+
         base_manifest = self._manifest(workspace_path)
         self._workspaces[workspace_id] = _WorkspaceState(
             path=workspace_path,

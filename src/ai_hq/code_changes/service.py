@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ai_hq.delivery.agent_runner import DeliveryAgentRunner
-from ai_hq.delivery.models import QAResult
+from ai_hq.delivery.models import DeliveryStage, QAResult
 from ai_hq.delivery.service import DeliveryService
 from ai_hq.missions.models import (
     MissionPriority,
@@ -132,6 +132,8 @@ class CodeChangeService:
         self,
         *,
         mission_id: str,
+        lease_owner: str | None = None,
+        lease_seconds: int = 900,
     ) -> CodeChangeResult:
         mission = self.mission_service.get_mission(
             mission_id
@@ -139,37 +141,91 @@ class CodeChangeService:
 
         if (
             mission.owner_agent != "developer"
-            or mission.source != "hq_chat_code_change"
+            or mission.source
+            != "hq_chat_code_change"
         ):
             raise ValueError(
-                "mission is not a queued HQ code change"
+                "mission is not a queued "
+                "HQ code change"
             )
 
         objectives = mission.objectives or []
 
         if not objectives:
             raise ValueError(
-                "queued code change has no repository"
+                "queued code change has "
+                "no repository"
             )
 
         repository = self._trusted_repository(
             objectives[0]
         )
 
+        if mission.status in {
+            MissionStatus.WAITING_APPROVAL,
+            MissionStatus.COMPLETED,
+        }:
+            return self._result_for_mission(
+                mission_id=mission.id,
+                repository=repository,
+            )
+
         if mission.status is MissionStatus.QUEUED:
+            if lease_owner is not None:
+                raise ValueError(
+                    "leased code change must "
+                    "already be running"
+                )
+
             self.mission_service.transition(
                 mission.id,
                 MissionStatus.RUNNING,
             )
-        elif mission.status is not MissionStatus.RUNNING:
+
+        elif (
+            mission.status
+            is MissionStatus.RUNNING
+        ):
+            if lease_owner is not None:
+                if (
+                    mission.lease_owner
+                    != lease_owner
+                ):
+                    raise ValueError(
+                        "code-change lease "
+                        "owner mismatch"
+                    )
+
+                renewed = (
+                    self.mission_service
+                    .renew_code_change_lease(
+                        mission.id,
+                        worker_id=lease_owner,
+                        lease_seconds=(
+                            lease_seconds
+                        ),
+                    )
+                )
+
+                if not renewed:
+                    raise RuntimeError(
+                        "code-change lease "
+                        "was lost"
+                    )
+
+        else:
             raise ValueError(
-                "queued code change is not runnable"
+                "queued code change is "
+                "not runnable"
             )
 
         try:
             result = self._run_existing_mission(
                 mission_id=mission.id,
                 repository=repository,
+                lease_owner=lease_owner,
+                lease_seconds=lease_seconds,
+                resume_existing=True,
             )
 
             target = (
@@ -178,35 +234,84 @@ class CodeChangeService:
                 else MissionStatus.COMPLETED
             )
 
-            self.mission_service.transition(
-                mission.id,
-                target,
-                result={
-                    "repository": repository,
-                    "change_ref": result.change_ref,
-                    "ready_for_approval": (
-                        result.ready_for_approval
-                    ),
-                },
+            payload = {
+                "repository": repository,
+                "change_ref": result.change_ref,
+                "ready_for_approval": (
+                    result.ready_for_approval
+                ),
+            }
+
+            current = (
+                self.mission_service
+                .get_mission(mission.id)
             )
+
+            if current.status is target:
+                self.mission_service.record_result(
+                    mission.id,
+                    result=payload,
+                )
+
+            elif (
+                current.status
+                is MissionStatus.RUNNING
+            ):
+                self.mission_service.transition(
+                    mission.id,
+                    target,
+                    result=payload,
+                )
+
+            else:
+                raise RuntimeError(
+                    "code-change mission changed "
+                    "state during preparation"
+                )
+
+            if lease_owner is not None:
+                (
+                    self.mission_service
+                    .release_code_change_lease(
+                        mission.id,
+                        worker_id=lease_owner,
+                    )
+                )
 
             return result
 
-        except Exception as exc:
-            current = self.mission_service.get_mission(
-                mission.id
+        except Exception:
+            current = (
+                self.mission_service
+                .get_mission(mission.id)
             )
 
-            if current.status is MissionStatus.RUNNING:
+            if (
+                current.status
+                is MissionStatus.RUNNING
+            ):
                 self.mission_service.transition(
                     mission.id,
                     MissionStatus.FAILED,
                     error_state={
                         "code": (
-                            "code_change_preparation_failed"
+                            "code_change_"
+                            "preparation_failed"
                         ),
-                        "message": str(exc)[:500],
+                        "message": (
+                            "Code-change candidate "
+                            "preparation failed."
+                        ),
                     },
+                )
+
+            if lease_owner is not None:
+                (
+                    self.mission_service
+                    .release_code_change_lease(
+                        mission.id,
+                        worker_id=lease_owner,
+                    )
                 )
 
             raise
@@ -279,27 +384,83 @@ class CodeChangeService:
         *,
         mission_id: str,
         repository: str,
+        lease_owner: str | None = None,
+        lease_seconds: int = 900,
+        resume_existing: bool = False,
     ) -> CodeChangeResult:
         runner = self.runner_factory(repository)
 
-        runner.run_developer(
-            mission_id=mission_id,
-        )
+        developer_delivery = None
 
-        developer_delivery = (
-            self.delivery_service.get_delivery(
-                mission_id
+        if resume_existing:
+            try:
+                developer_delivery = (
+                    self.delivery_service
+                    .get_delivery(mission_id)
+                )
+            except KeyError:
+                developer_delivery = None
+
+        if developer_delivery is None:
+            self._renew_worker_lease(
+                mission_id=mission_id,
+                lease_owner=lease_owner,
+                lease_seconds=lease_seconds,
             )
-        )
 
-        runner.run_qa(
-            developer_delivery
-        )
+            runner.run_developer(
+                mission_id=mission_id,
+            )
+
+            developer_delivery = (
+                self.delivery_service
+                .get_delivery(mission_id)
+            )
+
+        if (
+            developer_delivery.stage
+            is DeliveryStage.QA
+            and developer_delivery.qa_result
+            is None
+        ):
+            self._renew_worker_lease(
+                mission_id=mission_id,
+                lease_owner=lease_owner,
+                lease_seconds=lease_seconds,
+            )
+
+            runner.run_qa(
+                developer_delivery
+            )
 
         return self._result_for_mission(
             mission_id=mission_id,
             repository=repository,
         )
+
+    def _renew_worker_lease(
+        self,
+        *,
+        mission_id: str,
+        lease_owner: str | None,
+        lease_seconds: int,
+    ) -> None:
+        if lease_owner is None:
+            return
+
+        renewed = (
+            self.mission_service
+            .renew_code_change_lease(
+                mission_id,
+                worker_id=lease_owner,
+                lease_seconds=lease_seconds,
+            )
+        )
+
+        if not renewed:
+            raise RuntimeError(
+                "code-change lease was lost"
+            )
 
     def _result_for_mission(
         self,

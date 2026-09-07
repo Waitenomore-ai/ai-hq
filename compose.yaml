@@ -31,6 +31,8 @@ services:
         condition: service_healthy
     volumes:
       - /run/ai-hq:/run/ai-hq:ro
+      - /opt/ai-hq/repository-mirrors:/srv/ai-hq/repository-mirrors:ro
+      - /opt/ai-hq/repository-sandboxes:/srv/ai-hq/repository-sandboxes
     networks: [ai_hq]
     restart: unless-stopped
 

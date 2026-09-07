@@ -1,7 +1,8 @@
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from ai_hq.ledger.models import LedgerEventType
@@ -333,6 +334,210 @@ class MissionService:
                 .order_by(Mission.created_at, Mission.id)
                 .limit(1)
             )
+
+    def claim_oldest_code_change(
+        self,
+        *,
+        worker_id: str,
+        lease_seconds: int = 900,
+    ) -> Mission | None:
+        worker_id = (
+            worker_id.strip()
+            if isinstance(worker_id, str)
+            else ""
+        )
+
+        if not worker_id:
+            raise ValueError(
+                "code-change worker id is required"
+            )
+
+        if lease_seconds < 60:
+            raise ValueError(
+                "code-change lease must be "
+                "at least 60 seconds"
+            )
+
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(
+            seconds=lease_seconds
+        )
+
+        with self.session_factory() as db:
+            claimable = or_(
+                Mission.status
+                == MissionStatus.QUEUED,
+                and_(
+                    Mission.status
+                    == MissionStatus.RUNNING,
+                    Mission.lease_expires_at.is_not(
+                        None
+                    ),
+                    Mission.lease_expires_at < now,
+                ),
+            )
+
+            candidate_ids = list(
+                db.scalars(
+                    select(Mission.id)
+                    .where(
+                        Mission.source
+                        == "hq_chat_code_change",
+                        Mission.owner_agent
+                        == "developer",
+                        claimable,
+                    )
+                    .order_by(
+                        Mission.created_at,
+                        Mission.id,
+                    )
+                    .limit(8)
+                )
+            )
+
+            for mission_id in candidate_ids:
+                claimed = db.execute(
+                    update(Mission)
+                    .where(
+                        Mission.id == mission_id,
+                        Mission.source
+                        == "hq_chat_code_change",
+                        Mission.owner_agent
+                        == "developer",
+                        claimable,
+                    )
+                    .values(
+                        status=(
+                            MissionStatus.RUNNING
+                        ),
+                        lease_owner=worker_id,
+                        lease_expires_at=expires_at,
+                        attempt_count=(
+                            Mission.attempt_count + 1
+                        ),
+                    )
+                )
+
+                if claimed.rowcount != 1:
+                    db.rollback()
+                    continue
+
+                db.commit()
+
+                mission = db.get(
+                    Mission,
+                    mission_id,
+                )
+
+                if mission is None:
+                    raise RuntimeError(
+                        "claimed mission disappeared"
+                    )
+
+                return mission
+
+            return None
+
+    def renew_code_change_lease(
+        self,
+        mission_id: str,
+        *,
+        worker_id: str,
+        lease_seconds: int = 900,
+    ) -> bool:
+        if lease_seconds < 60:
+            raise ValueError(
+                "code-change lease must be "
+                "at least 60 seconds"
+            )
+
+        now = datetime.now(UTC)
+
+        with self.session_factory() as db:
+            renewed = db.execute(
+                update(Mission)
+                .where(
+                    Mission.id == mission_id,
+                    Mission.source
+                    == "hq_chat_code_change",
+                    Mission.owner_agent
+                    == "developer",
+                    Mission.status
+                    == MissionStatus.RUNNING,
+                    Mission.lease_owner
+                    == worker_id,
+                    Mission.lease_expires_at
+                    .is_not(None),
+                    Mission.lease_expires_at
+                    >= now,
+                )
+                .values(
+                    lease_expires_at=(
+                        now
+                        + timedelta(
+                            seconds=lease_seconds
+                        )
+                    )
+                )
+            )
+
+            if renewed.rowcount != 1:
+                db.rollback()
+                return False
+
+            db.commit()
+            return True
+
+    def release_code_change_lease(
+        self,
+        mission_id: str,
+        *,
+        worker_id: str,
+    ) -> bool:
+        with self.session_factory() as db:
+            released = db.execute(
+                update(Mission)
+                .where(
+                    Mission.id == mission_id,
+                    Mission.lease_owner
+                    == worker_id,
+                )
+                .values(
+                    lease_owner=None,
+                    lease_expires_at=None,
+                )
+            )
+
+            if released.rowcount != 1:
+                db.rollback()
+                return False
+
+            db.commit()
+            return True
+
+    def record_result(
+        self,
+        mission_id: str,
+        *,
+        result: dict,
+    ) -> Mission:
+        with self.session_factory() as db:
+            mission = db.get(
+                Mission,
+                mission_id,
+            )
+
+            if mission is None:
+                raise KeyError(
+                    f"mission not found: {mission_id}"
+                )
+
+            mission.result = dict(result)
+
+            db.commit()
+            db.refresh(mission)
+
+            return mission
 
     def assign_owner(self, mission_id: str, owner_agent: str) -> Mission:
         with self.session_factory() as db:
