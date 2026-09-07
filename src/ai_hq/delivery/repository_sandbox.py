@@ -4,6 +4,7 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
     FileChange,
     FileOperation,
+    NO_GIT_BASE_COMMIT,
     RepositoryWorkspace,
     TestEvidence,
 )
@@ -27,6 +29,7 @@ _CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 _MAX_EVIDENCE_SUMMARY = 4000
 _MAX_OUTPUT_PER_STREAM = 1800
 _MAX_CANDIDATE_REVIEW_DIFF = 24_000
+_GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass
@@ -34,6 +37,7 @@ class _WorkspaceState:
     path: Path
     profile: RepositoryProfile
     base_manifest: dict[str, str]
+    base_commit: str
     snapshot_fingerprint: str | None = None
     candidate_review_diff: str | None = None
 
@@ -60,6 +64,10 @@ class IsolatedRepositorySandbox:
         if not isinstance(mission_id, str) or not mission_id.strip():
             raise ValueError("mission_id is required")
 
+        base_commit = self._resolve_base_commit(
+            self._profile.source_path,
+            self._profile.base_ref,
+        )
         workspace_id = str(uuid4())
         workspace_path = self._sandbox_root / workspace_id
         ignore = None
@@ -99,12 +107,14 @@ class IsolatedRepositorySandbox:
             path=workspace_path,
             profile=self._profile,
             base_manifest=base_manifest,
+            base_commit=base_commit,
         )
         return RepositoryWorkspace(
             mission_id=mission_id,
             repository=self._profile.key,
             base_ref=self._profile.base_ref,
             workspace_id=workspace_id,
+            base_commit=base_commit,
         )
 
     def apply_changes(
@@ -220,6 +230,7 @@ class IsolatedRepositorySandbox:
             changed_files=changed_files,
             diff_digest=self._canonical_digest(diff_material),
             content_digest=content_digest,
+            base_commit=state.base_commit,
         )
 
     def review_diff(
@@ -420,6 +431,36 @@ class IsolatedRepositorySandbox:
             check=False,
         )
 
+    @staticmethod
+    def _resolve_base_commit(source: Path, base_ref: str) -> str:
+        git_marker = source / ".git"
+        if not git_marker.exists():
+            return NO_GIT_BASE_COMMIT
+
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(source),
+                    "rev-parse",
+                    "--verify",
+                    f"{base_ref}^{{commit}}",
+                ],
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("repository base commit could not be resolved") from exc
+
+        commit = (result.stdout or "").strip()
+        if result.returncode != 0 or not _GIT_COMMIT_RE.fullmatch(commit):
+            raise RuntimeError("repository base commit could not be resolved")
+        return commit
+
     def _validate_root_isolation(self) -> None:
         source = self._profile.source_path.resolve()
         sandbox = self._sandbox_root
@@ -438,6 +479,8 @@ class IsolatedRepositorySandbox:
             raise ValueError("workspace repository identity mismatch")
         if workspace.base_ref != state.profile.base_ref:
             raise ValueError("workspace base reference mismatch")
+        if workspace.base_commit != state.base_commit:
+            raise ValueError("workspace base commit mismatch")
         return state
 
     def _safe_target(self, workspace_root: Path, raw_path: str) -> Path:
