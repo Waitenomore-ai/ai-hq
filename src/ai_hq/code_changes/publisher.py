@@ -187,8 +187,14 @@ class GitHubCandidatePublisher:
             entry_type = entry.get("type")
             if not isinstance(path, str):
                 raise RuntimeError("GitHub base tree path is invalid")
-            if mode in {"120000", "160000"} or entry_type != "blob":
-                raise RuntimeError("GitHub base tree contains unsupported symlink, submodule, or non-blob entry")
+            if entry_type == "tree":
+                if mode != "040000":
+                    raise RuntimeError("GitHub base tree contains invalid directory mode")
+                continue
+            if mode in {"120000", "160000"}:
+                raise RuntimeError("GitHub base tree contains unsupported symlink or submodule entry")
+            if entry_type != "blob":
+                raise RuntimeError("GitHub base tree contains unsupported non-blob entry")
             if mode not in _ALLOWED_BLOB_MODES:
                 raise RuntimeError("GitHub base tree contains unsupported blob mode")
             base_entries[path] = entry
