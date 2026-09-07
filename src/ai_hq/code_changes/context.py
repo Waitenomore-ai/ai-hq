@@ -33,6 +33,104 @@ _BLOCKED_NAMES = frozenset(
     }
 )
 
+_SECRET_NAME_PARTS = frozenset(
+    {
+        "credentials",
+        "credential",
+        "secrets",
+        "secret",
+    }
+)
+
+_PRIVATE_KEY_MARKERS = (
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "-----BEGIN EC PRIVATE KEY-----",
+    "-----BEGIN DSA PRIVATE KEY-----",
+)
+
+_KNOWN_SECRET_PATTERNS = (
+    re.compile(
+        r"sk-or-v1-[A-Za-z0-9_-]{16,}"
+    ),
+    re.compile(
+        r"github_pat_[A-Za-z0-9_]{20,}"
+    ),
+    re.compile(
+        r"gh[pousr]_[A-Za-z0-9]{20,}"
+    ),
+    re.compile(
+        r"AKIA[0-9A-Z]{16}"
+    ),
+)
+
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"""
+    (?ix)
+    (?:
+        ^|[,{\s]
+    )
+    ["']?
+    (
+        [A-Za-z0-9_-]*
+        (?:
+            api[_-]?key
+            |
+            access[_-]?token
+            |
+            auth[_-]?token
+            |
+            bearer[_-]?token
+            |
+            client[_-]?secret
+            |
+            session[_-]?secret
+            |
+            secret[_-]?key
+            |
+            private[_-]?key
+            |
+            password
+            |
+            passwd
+            |
+            credential
+        )
+        [A-Za-z0-9_-]*
+    )
+    ["']?
+    \s*
+    (?:
+        =|:
+    )
+    \s*
+    ["']?
+    ([^"'\s,;}]{8,})
+    """,
+    re.MULTILINE | re.VERBOSE,
+)
+
+_PLACEHOLDER_VALUES = frozenset(
+    {
+        "example",
+        "example-value",
+        "placeholder",
+        "replace-me",
+        "changeme",
+        "change-me",
+        "your-key",
+        "your-api-key",
+        "your-api-key-here",
+        "your-token",
+        "your-token-here",
+        "your-password",
+        "your-password-here",
+        "dummy",
+        "test-value",
+    }
+)
+
 _BLOCKED_PARTS = frozenset(
     {
         ".git",
@@ -101,6 +199,11 @@ class RepositoryContextProvider:
                     encoding="utf-8"
                 )
             except (UnicodeDecodeError, OSError):
+                continue
+
+            if self._contains_sensitive_content(
+                content
+            ):
                 continue
 
             score = self._score(
@@ -185,7 +288,24 @@ class RepositoryContextProvider:
         ):
             return False
 
-        if path.name in _BLOCKED_NAMES:
+        name = path.name.casefold()
+
+        if (
+            name in _BLOCKED_NAMES
+            or name.startswith(".env.")
+        ):
+            return False
+
+        stem_parts = {
+            part
+            for part in re.split(
+                r"[^a-z0-9]+",
+                path.stem.casefold(),
+            )
+            if part
+        }
+
+        if stem_parts & _SECRET_NAME_PARTS:
             return False
 
         if path.suffix.casefold() not in _ALLOWED_SUFFIXES:
@@ -198,6 +318,52 @@ class RepositoryContextProvider:
             return False
 
         return True
+
+    @staticmethod
+    def _contains_sensitive_content(
+        content: str,
+    ) -> bool:
+        upper_content = content.upper()
+
+        if any(
+            marker in upper_content
+            for marker in _PRIVATE_KEY_MARKERS
+        ):
+            return True
+
+        if any(
+            pattern.search(content)
+            for pattern in _KNOWN_SECRET_PATTERNS
+        ):
+            return True
+
+        for match in _SECRET_ASSIGNMENT_RE.finditer(
+            content
+        ):
+            value = (
+                match.group(2)
+                .strip()
+                .strip("\"'")
+                .casefold()
+            )
+
+            normalized = value.strip(
+                "<>{}[]()"
+            )
+
+            if normalized in _PLACEHOLDER_VALUES:
+                continue
+
+            if (
+                normalized.startswith("your-")
+                or normalized.startswith("example-")
+                or normalized.startswith("dummy-")
+            ):
+                continue
+
+            return True
+
+        return False
 
     @staticmethod
     def _tokens(
