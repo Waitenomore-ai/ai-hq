@@ -193,10 +193,52 @@ class ModelBackedDeveloperAgent:
                     "Developer context files must be a list"
                 )
 
+            complete_context_paths: set[str] = set()
+
+            sanitized_files = []
+
+            for index, item in enumerate(files):
+                if not isinstance(item, dict):
+                    raise ValueError(
+                        f"Developer context file {index} must be an object"
+                    )
+
+                path = item.get("path")
+                content = item.get("content")
+                complete = item.get("complete")
+
+                if (
+                    not isinstance(path, str)
+                    or not path.strip()
+                    or not isinstance(content, str)
+                ):
+                    raise ValueError(
+                        f"Developer context file {index} is invalid"
+                    )
+
+                if complete is not True:
+                    # Partial source must never be writable by a
+                    # whole-file Developer change.
+                    continue
+
+                normalized_path = path.strip()
+
+                complete_context_paths.add(
+                    normalized_path
+                )
+
+                sanitized_files.append(
+                    {
+                        "path": normalized_path,
+                        "content": content,
+                        "complete": True,
+                    }
+                )
+
             repository_context = {
                 "repository": repository,
                 "instruction": instruction.strip(),
-                "files": files,
+                "files": sanitized_files,
             }
 
         raw = self.model_client.reply(
@@ -240,6 +282,15 @@ class ModelBackedDeveloperAgent:
             _validate_developer_change(change, index=index)
             for index, change in enumerate(changes)
         ]
+
+        if self.context_provider is not None:
+            for change in validated_changes:
+                if change["path"] not in complete_context_paths:
+                    raise ValueError(
+                        "Developer change path was not supplied "
+                        "with complete trusted context: "
+                        + change["path"]
+                    )
 
         return {
             "summary": summary.strip(),

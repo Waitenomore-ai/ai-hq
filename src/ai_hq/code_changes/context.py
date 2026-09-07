@@ -136,21 +136,27 @@ class RepositoryContextProvider:
             if remaining <= 0:
                 break
 
-            bounded = content[
-                : min(
-                    self.max_chars_per_file,
-                    remaining,
-                )
-            ]
+            # Developer changes are whole-file replacements.
+            # Never expose a partial file as writable source context.
+            #
+            # If the complete file cannot fit within both the trusted
+            # per-file and total context limits, skip it instead of
+            # truncating it.
+            if len(content) > self.max_chars_per_file:
+                continue
+
+            if len(content) > remaining:
+                continue
 
             files.append(
                 {
                     "path": relative,
-                    "content": bounded,
+                    "content": content,
+                    "complete": True,
                 }
             )
 
-            total += len(bounded)
+            total += len(content)
 
         return {
             "repository": self.repository,

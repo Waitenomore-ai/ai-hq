@@ -37,6 +37,7 @@ def test_developer_receives_bounded_repository_context():
                 {
                     "path": "public/nav.css",
                     "content": ".toolbar { height: 80px; }",
+                    "complete": True,
                 }
             ],
         }
@@ -71,7 +72,13 @@ def test_developer_context_cannot_supply_command_authority():
         return {
             "repository": "dripvid",
             "instruction": "change toolbar",
-            "files": [],
+            "files": [
+                {
+                    "path": "public/nav.css",
+                    "content": ".toolbar { height: 80px; }",
+                    "complete": True,
+                }
+            ],
             "command": "rm -rf /",
         }
 
