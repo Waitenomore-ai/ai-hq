@@ -137,7 +137,7 @@ class RepositoryProfileRegistry:
 def build_ai_hq_repository_profile(
     *,
     source_path: Path,
-    base_ref: str = "HEAD",
+    base_ref: str = "main",
 ) -> RepositoryProfile:
     return RepositoryProfile(
         key="ai-hq",
