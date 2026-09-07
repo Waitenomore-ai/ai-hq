@@ -1,4 +1,5 @@
 import inspect
+import subprocess
 from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired
 
@@ -12,7 +13,7 @@ from ai_hq.delivery.repository_sandbox import IsolatedRepositorySandbox
 from ai_hq.delivery.repository_workspace import FileChange, FileOperation
 
 
-def build_sandbox(tmp_path, *, command_runner=None):
+def build_sandbox(tmp_path, *, command_runner=None, base_ref="main"):
     source = tmp_path / "source"
     source.mkdir()
     (source / "src").mkdir()
@@ -21,7 +22,12 @@ def build_sandbox(tmp_path, *, command_runner=None):
 
     sandbox_root = tmp_path / "sandbox"
     registry = RepositoryProfileRegistry(
-        (build_ai_hq_repository_profile(source_path=source),)
+        (
+            build_ai_hq_repository_profile(
+                source_path=source,
+                base_ref=base_ref,
+            ),
+        )
     )
     kwargs = {}
     if command_runner is not None:
@@ -41,6 +47,26 @@ def only_workspace_path(sandbox_root: Path) -> Path:
     return paths[0]
 
 
+def init_git_main(source: Path) -> str:
+    subprocess.run(["git", "init", "-b", "main"], cwd=source, check=True)
+    subprocess.run(["git", "config", "user.name", "AI HQ Tests"], cwd=source, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "ai-hq-tests@example.invalid"],
+        cwd=source,
+        check=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=source, check=True)
+    subprocess.run(["git", "commit", "-m", "base"], cwd=source, check=True)
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
 def test_prepare_copies_source_into_disposable_sandbox_workspace(tmp_path):
     sandbox, source, sandbox_root = build_sandbox(tmp_path)
 
@@ -53,6 +79,27 @@ def test_prepare_copies_source_into_disposable_sandbox_workspace(tmp_path):
     assert workspace_path.parent == sandbox_root.resolve()
     assert (workspace_path / "src" / "original.py").read_text() == "VALUE = 1\n"
     assert (source / "src" / "original.py").read_text() == "VALUE = 1\n"
+
+
+def test_prepare_binds_real_git_source_to_exact_base_commit(tmp_path):
+    sandbox, source, _ = build_sandbox(tmp_path)
+    expected = init_git_main(source)
+
+    workspace = sandbox.prepare(mission_id="mission-git")
+    snapshot = sandbox.snapshot(workspace=workspace)
+
+    assert workspace.base_ref == "main"
+    assert workspace.base_commit == expected
+    assert snapshot.base_commit == expected
+    assert len(expected) == 40
+
+
+def test_prepare_fails_closed_for_unknown_base_ref_in_git_source(tmp_path):
+    sandbox, source, _ = build_sandbox(tmp_path, base_ref="missing-branch")
+    init_git_main(source)
+
+    with pytest.raises(RuntimeError, match="base commit"):
+        sandbox.prepare(mission_id="mission-invalid-base")
 
 
 def test_apply_changes_writes_nested_file_only_inside_workspace(tmp_path):
