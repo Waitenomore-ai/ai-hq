@@ -56,8 +56,8 @@ class RepositoryContextProvider:
         repository: str,
         source_path: Path,
         max_files: int = 12,
-        max_chars_per_file: int = 6000,
-        max_total_chars: int = 30000,
+        max_chars_per_file: int = 12000,
+        max_total_chars: int = 48000,
     ) -> None:
         if repository not in {"ai-hq", "dripvid"}:
             raise ValueError("unknown trusted repository")
