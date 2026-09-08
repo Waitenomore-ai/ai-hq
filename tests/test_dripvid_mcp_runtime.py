@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from ai_hq.dripvid_mcp.runtime import load_dripvid_mcp_token
