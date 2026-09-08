@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from ai_hq.dripvid_mcp.client import DripVidMcpClient
 from ai_hq.tool_gateway.contracts import ToolAdapterError, ToolRequest
@@ -20,14 +19,14 @@ class DripVidMcpAdapter:
 
         try:
             operation = self._operation(request)
-            text = asyncio.run(operation())
+            text = operation()
         except ToolAdapterError:
             raise
         except (OSError, RuntimeError, ValueError) as exc:
             raise ToolAdapterError("dripvid_mcp_failed") from exc
         return {"text": text}
 
-    def _operation(self, request: ToolRequest) -> Callable[[], Awaitable[str]]:
+    def _operation(self, request: ToolRequest) -> Callable[[], str]:
         if self.capability == "dripvid.health.read":
             self._require_no_params(request)
             return self._client.dripvid_health
