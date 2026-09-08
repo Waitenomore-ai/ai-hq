@@ -29,12 +29,28 @@ class RecoveryIncidentState(StrEnum):
     ESCALATED = "escalated"
 
 
+class RecoveryStatusResult(StrEnum):
+    UNKNOWN = "unknown"
+    HEALTHY = "healthy"
+    UNHEALTHY = "unhealthy"
+    ERROR = "error"
+
+
 def recovery_state_type() -> Enum:
     return Enum(
         RecoveryIncidentState,
         values_callable=lambda states: [state.value for state in states],
         native_enum=False,
         length=32,
+    )
+
+
+def recovery_status_result_type() -> Enum:
+    return Enum(
+        RecoveryStatusResult,
+        values_callable=lambda results: [result.value for result in results],
+        native_enum=False,
+        length=16,
     )
 
 
@@ -179,4 +195,58 @@ class RecoveryAttempt(Base):
         JSON,
         nullable=False,
         default=dict,
+    )
+
+
+class RecoveryStatus(Base):
+    __tablename__ = "recovery_status"
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("last_result", RecoveryStatusResult.UNKNOWN)
+        kwargs.setdefault("consecutive_failures", 0)
+        super().__init__(**kwargs)
+
+    target: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+    )
+    last_probe_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_result: Mapped[RecoveryStatusResult] = mapped_column(
+        recovery_status_result_type(),
+        nullable=False,
+        default=RecoveryStatusResult.UNKNOWN,
+    )
+    reachable: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+    )
+    status_code: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    ready: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+    )
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    active_incident_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+    )
+    active_incident_state: Mapped[RecoveryIncidentState | None] = mapped_column(
+        recovery_state_type(),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )

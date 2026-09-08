@@ -21,10 +21,46 @@ _STATE_MAP = {
     AgentStatus.COMPLETED: "IDLE",
 }
 
+_DEFAULT_RECOVERY = {
+    "last_probe_at": None,
+    "last_result": "unknown",
+    "reachable": None,
+    "status_code": None,
+    "ready": None,
+    "consecutive_failures": 0,
+    "active_incident_id": None,
+    "active_incident_state": None,
+}
+
 
 class HQStateService:
-    def __init__(self, session_factory):
+    def __init__(
+        self,
+        session_factory,
+        *,
+        recovery_status_service=None,
+        recovery_settings_provider=None,
+    ):
         self.session_factory = session_factory
+        self.recovery_status_service = recovery_status_service
+        self.recovery_settings_provider = recovery_settings_provider
+
+    def _recovery_snapshot(self) -> dict:
+        settings = (
+            self.recovery_settings_provider()
+            if self.recovery_settings_provider is not None
+            else {}
+        )
+        persisted = (
+            self.recovery_status_service.snapshot("dripvid")
+            if self.recovery_status_service is not None
+            else _DEFAULT_RECOVERY
+        )
+        return {
+            "enabled": bool(settings.get("enabled", False)),
+            "observe_only": bool(settings.get("observe_only", True)),
+            **dict(persisted),
+        }
 
     def snapshot(self) -> dict:
         with self.session_factory() as db:
@@ -190,4 +226,5 @@ class HQStateService:
                     "version": 1,
                 },
                 "rooms": rooms,
+                "recovery": self._recovery_snapshot(),
             }

@@ -1,6 +1,7 @@
 (() => {
   const rootPath = document.body.dataset.rootPath || "";
   const knownStates = new Set(["WORKING", "WAITING_APPROVAL", "PASSED", "IDLE", "FAILED", "OFFLINE"]);
+  const knownRecoveryResults = new Set(["healthy", "unhealthy", "error", "unknown"]);
   const connection = document.querySelector("[data-connection-status]");
   const detailEmpty = document.querySelector("[data-detail-empty]");
   const detailContent = document.querySelector("[data-detail-content]");
@@ -8,6 +9,12 @@
   const detailStatus = document.querySelector("[data-detail-status]");
   const detailAgent = document.querySelector("[data-detail-agent]");
   const detailMission = document.querySelector("[data-detail-mission]");
+  const recoveryCard = document.querySelector("[data-recovery-card]");
+  const recoveryState = document.querySelector("[data-recovery-state]");
+  const recoveryMode = document.querySelector("[data-recovery-mode]");
+  const recoveryLastProbe = document.querySelector("[data-recovery-last-probe]");
+  const recoveryFailures = document.querySelector("[data-recovery-failures]");
+  const recoveryIncident = document.querySelector("[data-recovery-incident]");
   const rooms = new Map(
     [...document.querySelectorAll("[data-room-key]")].map((element) => [element.dataset.roomKey, element])
   );
@@ -111,6 +118,84 @@
     });
   };
 
+  const normalizeRecovery = (value = {}) => {
+    const result = knownRecoveryResults.has(value.last_result)
+      ? value.last_result
+      : "unknown";
+    const statusCode =
+      Number.isInteger(value.status_code) && value.status_code >= 100 && value.status_code <= 599
+        ? value.status_code
+        : null;
+    const failures =
+      Number.isInteger(value.consecutive_failures) && value.consecutive_failures >= 0
+        ? value.consecutive_failures
+        : 0;
+    const incidentId = typeof value.active_incident_id === "string" && value.active_incident_id
+      ? value.active_incident_id
+      : null;
+    const incidentState = typeof value.active_incident_state === "string" && value.active_incident_state
+      ? value.active_incident_state
+      : null;
+    const probeValue = typeof value.last_probe_at === "string" ? value.last_probe_at : null;
+    const probeDate = probeValue ? new Date(probeValue) : null;
+
+    return {
+      enabled: value.enabled === true,
+      observe_only: value.observe_only !== false,
+      last_result: result,
+      reachable: typeof value.reachable === "boolean" ? value.reachable : null,
+      status_code: statusCode,
+      ready: typeof value.ready === "boolean" ? value.ready : null,
+      consecutive_failures: failures,
+      active_incident_id: incidentId,
+      active_incident_state: incidentState,
+      last_probe_at:
+        probeDate && !Number.isNaN(probeDate.getTime()) ? probeDate : null,
+    };
+  };
+
+  const renderRecovery = (value) => {
+    const recovery = normalizeRecovery(value);
+    if (!recoveryCard) return;
+
+    let stateCopy = "Waiting for first probe";
+    if (!recovery.enabled) {
+      stateCopy = "Disabled";
+    } else if (recovery.last_result === "healthy") {
+      stateCopy = "Healthy";
+    } else if (recovery.last_result === "unhealthy") {
+      stateCopy = "Unhealthy";
+    } else if (recovery.last_result === "error") {
+      stateCopy = "Probe error";
+    }
+
+    recoveryCard.dataset.recoveryResult = recovery.enabled ? recovery.last_result : "disabled";
+    if (recoveryState) recoveryState.textContent = stateCopy;
+    if (recoveryMode) {
+      recoveryMode.textContent = recovery.observe_only
+        ? "Observe only"
+        : "Active recovery configured";
+    }
+    if (recoveryLastProbe) {
+      recoveryLastProbe.textContent = recovery.last_probe_at
+        ? recovery.last_probe_at.toLocaleString()
+        : "—";
+    }
+    if (recoveryFailures) {
+      recoveryFailures.textContent = String(recovery.consecutive_failures);
+    }
+    if (recoveryIncident) {
+      if (recovery.active_incident_id) {
+        const shortId = recovery.active_incident_id.slice(0, 8);
+        recoveryIncident.textContent = recovery.active_incident_state
+          ? `${recovery.active_incident_state} · ${shortId}`
+          : shortId;
+      } else {
+        recoveryIncident.textContent = "None";
+      }
+    }
+  };
+
   const markDisconnected = () => {
     if (connection) {
       connection.textContent = "State feed offline";
@@ -137,6 +222,7 @@
       const normalized = Array.isArray(payload.rooms) ? payload.rooms.map(normalizeRoom) : [];
       latestRooms = new Map(normalized.map((room) => [room.key, room]));
       normalized.forEach(renderRoom);
+      renderRecovery(payload.recovery);
 
       const developer = latestRooms.get("developer");
       const qa = latestRooms.get("qa");
