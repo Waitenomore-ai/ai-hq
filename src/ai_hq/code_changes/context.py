@@ -140,6 +140,13 @@ _BLOCKED_PARTS = frozenset(
     }
 )
 
+_RELEVANCE_ALIASES = {
+    "phone": ("mobile",),
+    "phones": ("mobile",),
+    "menu": ("nav", "sidebar"),
+    "spacing": ("gap",),
+}
+
 
 class RepositoryContextProvider:
     """
@@ -420,5 +427,9 @@ class RepositoryContextProvider:
 
             if token in haystack_content:
                 score += 2
+
+            for alias in _RELEVANCE_ALIASES.get(token, ()):
+                if alias in haystack_content:
+                    score += 2
 
         return score
