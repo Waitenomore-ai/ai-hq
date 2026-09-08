@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 
@@ -7,7 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ai_hq.config import OperatingMode, Settings
+from ai_hq.config import OperatingMode, Settings, get_settings
+from ai_hq.db import get_session_factory
 from ai_hq.recovery.models import RecoveryAttempt, RecoveryIncident, RecoveryIncidentState
 from ai_hq.recovery.status import RecoveryStatusService
 
@@ -197,3 +200,38 @@ class RecoveryDrillService:
             "status": "unhealthy",
             "observe_only": True,
         }
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    service: RecoveryDrillService | None = None,
+    settings: Settings | object | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(description="Run the fixed observe-only recovery drill")
+    parser.add_argument("--json", action="store_true", dest="json_output")
+    args = parser.parse_args(argv)
+
+    if settings is None:
+        settings = get_settings()
+    if service is None:
+        service = RecoveryDrillService(get_session_factory())
+
+    result = service.run(settings=settings)
+    if args.json_output:
+        print(json.dumps(result, sort_keys=True))
+    elif result.get("ok") is True:
+        print(
+            "recovery-drill: ok "
+            f"incident={result.get('incident_id')} "
+            f"state={result.get('incident_state')} "
+            f"failures={result.get('consecutive_failures')}"
+        )
+    else:
+        print(f"recovery-drill: failed code={result.get('code', 'drill_failed')}")
+
+    return 0 if result.get("ok") is True else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
