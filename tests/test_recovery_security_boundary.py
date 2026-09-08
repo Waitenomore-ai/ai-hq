@@ -8,6 +8,7 @@ from ai_hq.host_helper.server import _default_allow_lists
 
 RECOVERY_PACKAGE = Path("src/ai_hq/recovery")
 RECOVERY_BOOTSTRAP = RECOVERY_PACKAGE / "bootstrap.py"
+RECOVERY_DRILL = RECOVERY_PACKAGE / "drill.py"
 WORKER = Path("src/ai_hq/worker.py")
 OBSERVABILITY_SOURCES = (
     RECOVERY_PACKAGE / "status.py",
@@ -176,3 +177,40 @@ def test_recovery_observability_surface_has_no_mutation_authority():
     assert "<button" not in card
     assert "<form" not in card
     assert "data-action" not in card
+
+
+def test_recovery_drill_has_no_mutation_authority_or_configurable_target_surface():
+    source = RECOVERY_DRILL.read_text(encoding="utf-8").casefold()
+    imports = _imported_modules(RECOVERY_DRILL)
+    calls = _called_names(RECOVERY_DRILL)
+
+    for forbidden_import in (
+        "subprocess",
+        "os",
+        "shlex",
+        "ai_hq.host_helper.executor",
+        "ai_hq.recovery.observer",
+        "ai_hq.tool_gateway",
+    ):
+        assert forbidden_import not in imports
+
+    for forbidden_call in (
+        "service_recover",
+        "service_restart",
+        "deployment_deploy",
+        "deployment_rollback",
+        "systemctl",
+    ):
+        assert forbidden_call not in calls
+
+    for forbidden_text in (
+        "service.recover",
+        "hosthelperoperationaltransport",
+        "servicerecoveradapter",
+        "--target",
+        "--component",
+        "--url",
+        "--command",
+        "--threshold",
+    ):
+        assert forbidden_text not in source
