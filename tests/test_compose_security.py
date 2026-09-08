@@ -44,24 +44,24 @@ def test_web_receives_only_read_only_repository_mirrors():
     )
 
 
-def test_dripvid_mcp_socket_and_token_are_exposed_only_to_web():
+def test_dripvid_mcp_socket_and_token_are_exposed_only_to_worker():
     compose = load_compose()
     services = compose["services"]
     web = services["web"]
     worker = services["worker"]
 
-    assert MCP_RUNTIME_BIND in web.get("volumes", [])
-    assert all("/run/dripvid-mcp" not in str(volume) for volume in worker.get("volumes", []))
+    assert MCP_RUNTIME_BIND in worker.get("volumes", [])
+    assert all("/run/dripvid-mcp" not in str(volume) for volume in web.get("volumes", []))
 
-    web_secrets = web.get("secrets", [])
+    worker_secrets = worker.get("secrets", [])
     assert {
         "source": "dripvid_mcp_token",
         "target": "dripvid-mcp-token",
         "mode": 0o400,
-    } in web_secrets
+    } in worker_secrets
     assert all(
         secret.get("source") != "dripvid_mcp_token"
-        for secret in worker.get("secrets", [])
+        for secret in web.get("secrets", [])
         if isinstance(secret, dict)
     )
 
