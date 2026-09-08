@@ -1,3 +1,4 @@
+import logging
 import time
 
 from ai_hq.agents.registry import AgentRegistry
@@ -41,6 +42,9 @@ from ai_hq.safety.service import SafetyService
 from ai_hq.system_state import ensure_system_state
 from ai_hq.tool_gateway.registry import ToolRegistry
 from ai_hq.tool_gateway.service import ToolGateway
+
+
+logger = logging.getLogger(__name__)
 
 
 def execution_allowed(mode: OperatingMode) -> bool:
@@ -122,21 +126,9 @@ def build_code_change_queue_runner(
     session_factory=None,
 ) -> CodeChangeQueueRunner | None:
     required = (
-        getattr(
-            settings,
-            "repository_sandbox_root_path",
-            None,
-        ),
-        getattr(
-            settings,
-            "ai_hq_repository_source_path",
-            None,
-        ),
-        getattr(
-            settings,
-            "dripvid_repository_source_path",
-            None,
-        ),
+        getattr(settings, "repository_sandbox_root_path", None),
+        getattr(settings, "ai_hq_repository_source_path", None),
+        getattr(settings, "dripvid_repository_source_path", None),
     )
 
     if any(value is None for value in required):
@@ -150,18 +142,14 @@ def build_code_change_queue_runner(
     service = build_code_change_service(
         settings=settings,
         session_factory=session_factory,
-        model_client=build_chat_model_client(
-            settings
-        ),
+        model_client=build_chat_model_client(settings),
         enable_publishing=True,
     )
 
     if service is None:
         return None
 
-    return CodeChangeQueueRunner(
-        code_change_service=service
-    )
+    return CodeChangeQueueRunner(code_change_service=service)
 
 
 def build_autonomous_mission_runner(
@@ -264,6 +252,11 @@ def run_worker_iteration(
     Recovery observation may persist a mission, but autonomous mission
     execution remains the first executable path. Any recovery mutation still
     happens later through MissionExecutor -> ToolGateway.
+
+    Code-change failures are isolated because that path already persists a
+    sanitized mission failure. A malformed model response or provider error
+    must not terminate the whole worker process. Other worker-stage failures
+    retain their existing propagation semantics.
     """
     recovery_worked = False
     if recovery_coordinator is not None and settings is not None:
@@ -276,9 +269,16 @@ def run_worker_iteration(
         return True
 
     if code_change_runner is not None:
-        result = code_change_runner.run_once()
-        if result is not None:
-            return True
+        try:
+            code_change_result = code_change_runner.run_once()
+        except Exception as exc:
+            logger.error(
+                "code_change_runner_failed error_type=%s",
+                type(exc).__name__,
+            )
+        else:
+            if code_change_result is not None:
+                return True
 
     if department_runner.run_once():
         return True
@@ -312,11 +312,7 @@ def run_worker() -> int:
             department_runner = build_department_runner(settings)
 
         if code_change_runner is None:
-            code_change_runner = (
-                build_code_change_queue_runner(
-                    settings
-                )
-            )
+            code_change_runner = build_code_change_queue_runner(settings)
 
         if not recovery_initialized:
             recovery_coordinator = build_recovery_coordinator(settings)
