@@ -3,7 +3,7 @@ set -euo pipefail
 
 ENV_FILE=/etc/ai-hq/ai-hq.env
 TOKEN_FILE=/etc/ai-hq/github-publisher.token
-ENV_LINE="AI_HQ_GITHUB_PUBLISH_TOKEN_SOURCE=$TOKEN_FILE"
+ENV_LINE='AI_HQ_GITHUB_PUBLISH_TOKEN_SOURCE=/etc/ai-hq/github-publisher.token'
 
 fail(){ echo "install-github-publisher-token: $*" >&2; exit 1; }
 
