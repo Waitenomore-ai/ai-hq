@@ -1,3 +1,4 @@
+import logging
 import time
 
 from ai_hq.code_changes.runtime import build_code_change_service
@@ -38,6 +39,9 @@ from ai_hq.safety.service import SafetyService
 from ai_hq.system_state import ensure_system_state
 from ai_hq.tool_gateway.registry import ToolRegistry
 from ai_hq.tool_gateway.service import ToolGateway
+
+
+logger = logging.getLogger(__name__)
 
 
 def execution_allowed(mode: OperatingMode) -> bool:
@@ -251,6 +255,12 @@ def run_worker_iteration(
     Recovery observation may persist a mission, but autonomous mission
     execution remains the first executable path. Any recovery mutation still
     happens later through MissionExecutor -> ToolGateway.
+
+    Only the code-change stage is failure-isolated here: it already fails
+    missions safely and sanitizes persisted error state, so a single
+    malformed model response or provider error must not terminate the whole
+    worker process. Failures are logged with sanitized structured fields
+    only. Every other stage keeps its existing propagation semantics.
     """
     recovery_worked = False
     if recovery_coordinator is not None and settings is not None:
@@ -263,9 +273,16 @@ def run_worker_iteration(
         return True
 
     if code_change_runner is not None:
-        result = code_change_runner.run_once()
-        if result is not None:
-            return True
+        try:
+            code_change_result = code_change_runner.run_once()
+        except Exception as exc:
+            logger.error(
+                "code_change_runner_failed error_type=%s",
+                type(exc).__name__,
+            )
+        else:
+            if code_change_result is not None:
+                return True
 
     if department_runner.run_once():
         return True
