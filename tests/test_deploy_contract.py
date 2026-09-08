@@ -82,3 +82,30 @@ def test_deploy_script_requires_fixed_dripvid_mcp_socket_and_secure_token_source
     assert "AI_HQ_DRIPVID_MCP_SOCKET=/run/dripvid-mcp/mcp.sock" in text
     assert "AI_HQ_DRIPVID_MCP_TOKEN_FILE=/run/secrets/dripvid-mcp-token" in text
     assert "DripVid MCP token file permissions are too broad" in text
+
+
+def test_dripvid_mcp_credential_installer_copies_token_without_printing_it():
+    text = Path("deploy/install-dripvid-mcp-token.sh").read_text()
+
+    assert "SOURCE_ENV=/etc/dripvid/mcp.env" in text
+    assert "TARGET_TOKEN=/etc/ai-hq/dripvid-mcp.token" in text
+    assert "TARGET_ENV=/etc/ai-hq/ai-hq.env" in text
+    assert "MCP_BEARER_TOKEN" in text
+    assert 'chmod 600 "$TARGET_TOKEN"' in text
+    assert 'chown root:root "$TARGET_TOKEN"' in text
+    assert "AI_HQ_DRIPVID_MCP_TOKEN_SOURCE=/etc/ai-hq/dripvid-mcp.token" in text
+    assert "AI_HQ_DRIPVID_MCP_TOKEN_FILE=/run/secrets/dripvid-mcp-token" in text
+    assert "AI_HQ_DRIPVID_MCP_SOCKET=/run/dripvid-mcp/mcp.sock" in text
+    assert 'echo "$TOKEN"' not in text
+    assert 'printf "%s\\n" "$TOKEN"' not in text
+
+
+def test_production_check_verifies_worker_only_mcp_and_live_read():
+    text = Path("deploy/check-production.sh").read_text()
+
+    assert "/run/dripvid-mcp|/run/dripvid-mcp|false" in text
+    assert "web container must not have DripVid MCP runtime mount" in text
+    assert "/run/secrets/dripvid-mcp-token" in text
+    assert "DripVidMcpClient" in text
+    assert "dripvid_health()" in text
+    assert "MCP read-only health" in text
