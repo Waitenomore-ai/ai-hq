@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     ai_hq_repository_source: str | None = None
     dripvid_repository_source: str | None = None
     github_publish_token_file: str | None = None
+    dripvid_mcp_socket: str = "/run/dripvid-mcp/mcp.sock"
+    dripvid_mcp_token_file: str | None = None
+    dripvid_mcp_timeout_seconds: float = Field(default=5.0, ge=0.5, le=30.0)
 
     recovery_enabled: bool = False
     recovery_observe_only: bool = True
@@ -102,6 +105,16 @@ class Settings(BaseSettings):
             return None
         return Path(self.github_publish_token_file).expanduser()
 
+    @property
+    def dripvid_mcp_socket_path(self) -> Path:
+        return Path(self.dripvid_mcp_socket).expanduser()
+
+    @property
+    def dripvid_mcp_token_file_path(self) -> Path | None:
+        if self.dripvid_mcp_token_file is None:
+            return None
+        return Path(self.dripvid_mcp_token_file).expanduser()
+
     @model_validator(mode="after")
     def validate_repository_sandbox_paths(self) -> "Settings":
         sandbox = self.repository_sandbox_root_path
@@ -117,11 +130,7 @@ class Settings(BaseSettings):
             if source is None:
                 continue
 
-            if (
-                source == sandbox
-                or source in sandbox.parents
-                or sandbox in source.parents
-            ):
+            if source == sandbox or source in sandbox.parents or sandbox in source.parents:
                 raise ValueError(
                     "repository sandbox must not overlap "
                     f"the {repository_name} repository source"
@@ -138,6 +147,20 @@ class Settings(BaseSettings):
             ai_hq_source=self.ai_hq_repository_source_path,
             dripvid_source=self.dripvid_repository_source_path,
         )
+        return self
+
+    @model_validator(mode="after")
+    def validate_dripvid_mcp_paths(self) -> "Settings":
+        if not self.is_production:
+            return self
+
+        socket_value = self.dripvid_mcp_socket.strip()
+        if "://" in socket_value or not self.dripvid_mcp_socket_path.is_absolute():
+            raise ValueError("AI HQ production DripVid MCP socket must be an absolute Unix path")
+
+        token_path = self.dripvid_mcp_token_file_path
+        if token_path is not None and not token_path.is_absolute():
+            raise ValueError("AI HQ production DripVid MCP token path must be absolute")
         return self
 
     @model_validator(mode="after")

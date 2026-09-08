@@ -1,9 +1,9 @@
 import time
 
-from ai_hq.code_changes.runtime import build_code_change_service
-from ai_hq.code_changes.worker import CodeChangeQueueRunner
 from ai_hq.agents.registry import AgentRegistry
 from ai_hq.chat.model_client import build_chat_model_client
+from ai_hq.code_changes.runtime import build_code_change_service
+from ai_hq.code_changes.worker import CodeChangeQueueRunner
 from ai_hq.config import OperatingMode, Settings, get_settings
 from ai_hq.db import get_session_factory
 from ai_hq.delivery.agent_runner import DeliveryAgentRunner
@@ -18,6 +18,9 @@ from ai_hq.delivery.runtime import DeliveryRuntime
 from ai_hq.delivery.service import DeliveryService
 from ai_hq.departments.runner import DepartmentRunner
 from ai_hq.departments.sysadmin import SysAdminService
+from ai_hq.dripvid_mcp.adapter import build_dripvid_mcp_adapters
+from ai_hq.dripvid_mcp.client import DripVidMcpClient
+from ai_hq.dripvid_mcp.runtime import load_dripvid_mcp_token
 from ai_hq.host_helper.client import HostHelperClient, HostHelperError
 from ai_hq.host_helper.contracts import HostAllowLists
 from ai_hq.ledger.service import OperationsLedger
@@ -180,7 +183,7 @@ def build_autonomous_mission_runner(
     ledger = OperationsLedger(session_factory)
     missions = MissionService(session_factory, ledger)
     safety = SafetyService(session_factory, ledger=ledger)
-    registry = ToolRegistry([])
+    adapters = []
 
     if settings.host_helper_credential:
         helper = HostHelperClient(
@@ -210,7 +213,7 @@ def build_autonomous_mission_runner(
                 ),
             ]
         )
-        registry = ToolRegistry(
+        adapters.extend(
             [
                 SystemHealthAdapter(targets=targets, transport=transport),
                 ServiceStatusAdapter(targets=targets, transport=transport),
@@ -219,6 +222,16 @@ def build_autonomous_mission_runner(
             ]
         )
 
+    mcp_token_path = getattr(settings, "dripvid_mcp_token_file_path", None)
+    if mcp_token_path is not None:
+        mcp_client = DripVidMcpClient(
+            token=load_dripvid_mcp_token(mcp_token_path),
+            socket_path=str(settings.dripvid_mcp_socket_path),
+            timeout_seconds=settings.dripvid_mcp_timeout_seconds,
+        )
+        adapters.extend(build_dripvid_mcp_adapters(mcp_client))
+
+    registry = ToolRegistry(adapters)
     gateway = ToolGateway(
         session_factory,
         registry=registry,

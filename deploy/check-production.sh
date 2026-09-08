@@ -29,7 +29,7 @@ if command -v ss >/dev/null; then
   ss -ltn | grep -Eq '127\.0\.0\.1:8090' || fail "localhost port 8090 is not listening"
 fi
 
-[[ ${EUID:-$(id -u)} -eq 0 ]] || fail "run as root so the root-readable helper credential can be verified safely"
+[[ ${EUID:-$(id -u)} -eq 0 ]] || fail "run as root so root-readable credentials can be verified safely"
 command -v python3 >/dev/null || fail "python3 is required"
 command -v docker >/dev/null || fail "docker is required"
 
@@ -92,11 +92,43 @@ grep -Fxq '/run/ai-hq|/run/ai-hq|false' <<<"$worker_mounts" || fail "worker does
 if grep -Fq '|/run/ai-hq|' <<<"$web_mounts"; then
   fail "web container must not have Host Helper runtime mount"
 fi
+
+grep -Fxq '/run/dripvid-mcp|/run/dripvid-mcp|false' <<<"$worker_mounts" || fail "worker does not have read-only DripVid MCP runtime mount"
+if grep -Fq '|/run/dripvid-mcp|' <<<"$web_mounts"; then
+  fail "web container must not have DripVid MCP runtime mount"
+fi
+
+docker exec "$worker_id" test -S /run/dripvid-mcp/mcp.sock || fail "worker cannot see DripVid MCP socket"
+docker exec "$worker_id" test -f /run/secrets/dripvid-mcp-token || fail "worker cannot see DripVid MCP credential file"
+if docker exec "$web_id" test -e /run/secrets/dripvid-mcp-token 2>/dev/null; then
+  fail "web container must not have DripVid MCP credential"
+fi
+
 if grep -Fq '/var/run/docker.sock' <<<"$worker_mounts$web_mounts"; then
   fail "AI HQ containers must not have Docker socket access"
 fi
 [[ "$(docker inspect --format '{{.HostConfig.Privileged}}' "$worker_id")" == "false" ]] || fail "worker is privileged"
 [[ "$(docker inspect --format '{{.HostConfig.Privileged}}' "$web_id")" == "false" ]] || fail "web is privileged"
-echo "ai-hq-check: OK worker-only Host Helper isolation"
+echo "ai-hq-check: OK worker-only Host Helper and DripVid MCP isolation"
+
+docker exec -i "$worker_id" python - <<'PY' || fail "DripVid MCP read-only health failed"
+from pathlib import Path
+
+from ai_hq.dripvid_mcp.client import DripVidMcpClient
+from ai_hq.dripvid_mcp.runtime import load_dripvid_mcp_token
+
+client = DripVidMcpClient(
+    token=load_dripvid_mcp_token(Path("/run/secrets/dripvid-mcp-token")),
+    socket_path="/run/dripvid-mcp/mcp.sock",
+    timeout_seconds=5.0,
+)
+try:
+    result = client.dripvid_health()
+    if not isinstance(result, str) or not result:
+        raise SystemExit(1)
+finally:
+    client.close()
+PY
+echo "ai-hq-check: OK MCP read-only health"
 
 echo "ai-hq-check: production smoke checks passed"

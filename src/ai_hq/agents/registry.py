@@ -7,6 +7,13 @@ from ai_hq.agents.models import Agent, AgentStatus
 
 SessionFactory = Callable[[], Session]
 
+_DRIPVID_MCP_READ_PERMISSIONS = [
+    "dripvid.health.read",
+    "dripvid.release.read",
+    "dripvid.config.read",
+    "dripvid.service.status.read",
+]
+
 _PHASE1_AGENTS = (
     {
         "key": "commander",
@@ -20,6 +27,7 @@ _PHASE1_AGENTS = (
             "knowledge.read_shared",
             "agents.view_status",
         ],
+        "permissions": [],
     },
     {
         "key": "communications",
@@ -32,6 +40,7 @@ _PHASE1_AGENTS = (
             "email.draft",
             "contacts.read",
         ],
+        "permissions": [],
     },
     {
         "key": "calendar",
@@ -43,6 +52,7 @@ _PHASE1_AGENTS = (
             "calendar.summarize",
             "calendar.create_private_reminder",
         ],
+        "permissions": [],
     },
     {
         "key": "sysadmin",
@@ -55,6 +65,7 @@ _PHASE1_AGENTS = (
             "logs.read",
             "disk.inspect",
         ],
+        "permissions": _DRIPVID_MCP_READ_PERMISSIONS,
     },
 )
 
@@ -76,9 +87,17 @@ class AgentRegistry:
                         display_name=definition["display_name"],
                         role=definition["role"],
                         capabilities=list(definition["capabilities"]),
-                        permissions=[],
+                        permissions=list(definition["permissions"]),
                     )
                     db.add(agent)
+                    existing[definition["key"]] = agent
+                elif definition["permissions"]:
+                    agent = existing[definition["key"]]
+                    permissions = list(agent.permissions or [])
+                    for permission in definition["permissions"]:
+                        if permission not in permissions:
+                            permissions.append(permission)
+                    agent.permissions = permissions
             db.commit()
             agents = list(
                 db.scalars(select(Agent).where(Agent.key.in_([a["key"] for a in _PHASE1_AGENTS])))
