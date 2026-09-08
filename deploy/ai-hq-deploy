@@ -5,6 +5,7 @@ BASE=/opt/ai-hq
 RELEASES="$BASE/releases"
 APP_LINK="$BASE/app"
 ENV_FILE=/etc/ai-hq/ai-hq.env
+PUBLISH_TOKEN_SOURCE=/etc/ai-hq/github-publisher.token
 KEEP_RELEASES=5
 
 fail(){ echo "ai-hq-deploy: $*" >&2; exit 1; }
@@ -18,7 +19,7 @@ EXPECTED="/tmp/ai-hq-release-${SHA}.tgz"
 [[ -f "$ARCHIVE" ]] || fail "release archive not found"
 [[ -f "$ENV_FILE" ]] || fail "production environment file is missing"
 
-for command in flock tar docker curl nginx; do
+for command in flock tar docker curl nginx stat; do
   command -v "$command" >/dev/null || fail "$command is required"
 done
 
@@ -29,6 +30,14 @@ grep -Eq '^AI_HQ_OPERATING_MODE=safe$' "$ENV_FILE" || fail "AI HQ must deploy in
 grep -Eq '^AI_HQ_SIMULATION_MODE=true$' "$ENV_FILE" || fail "AI HQ must deploy with simulation mode enabled"
 grep -Eq '^AI_HQ_HOST_HELPER_CREDENTIAL=[A-Za-z0-9_-]{32,128}$' "$ENV_FILE" || fail "Host Helper credential is missing; run deploy/install-host-helper.sh first"
 test -S /run/ai-hq/host-helper.sock || fail "Host Helper socket is missing; run deploy/install-host-helper.sh first"
+
+grep -Fxq 'AI_HQ_GITHUB_PUBLISH_TOKEN_SOURCE=/etc/ai-hq/github-publisher.token' "$ENV_FILE" || fail "GitHub publisher token source is missing; run deploy/install-github-publisher-token.sh first"
+[[ -f "$PUBLISH_TOKEN_SOURCE" && ! -L "$PUBLISH_TOKEN_SOURCE" ]] || fail "GitHub publisher token file must be a regular non-symlink file"
+TOKEN_MODE="$(stat -c '%a' "$PUBLISH_TOKEN_SOURCE")"
+TOKEN_UID="$(stat -c '%u' "$PUBLISH_TOKEN_SOURCE")"
+[[ "$TOKEN_UID" == "0" ]] || fail "GitHub publisher token file must be owned by root"
+(( (8#$TOKEN_MODE & 077) == 0 )) || fail "GitHub publisher token file permissions are too broad"
+grep -q '[^[:space:]]' "$PUBLISH_TOKEN_SOURCE" || fail "GitHub publisher token file is empty"
 
 grep -Fxq 'AI_HQ_REPOSITORY_MIRROR_ROOT=/srv/ai-hq/repository-mirrors' "$ENV_FILE" || fail "trusted repository mirror root is missing"
 grep -Fxq 'AI_HQ_REPOSITORY_SANDBOX_ROOT=/srv/ai-hq/repository-sandboxes' "$ENV_FILE" || fail "repository sandbox root is missing"
