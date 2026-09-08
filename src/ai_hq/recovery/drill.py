@@ -50,6 +50,21 @@ class RecoveryDrillService:
     def _now(self) -> datetime:
         return _utc(self.clock())
 
+    def _has_active_incident(self) -> bool | None:
+        try:
+            with self.session_factory() as db:
+                active = db.scalar(
+                    select(RecoveryIncident.id)
+                    .where(
+                        RecoveryIncident.target == _TARGET,
+                        RecoveryIncident.active_key.is_not(None),
+                    )
+                    .limit(1)
+                )
+                return active is not None
+        except Exception:
+            return None
+
     def _fresh_healthy_snapshot(self, now: datetime) -> tuple[bool, str | None]:
         try:
             snapshot = RecoveryStatusService(self.session_factory).snapshot(_TARGET)
@@ -133,6 +148,12 @@ class RecoveryDrillService:
             return _failure("observe_only_required")
         if settings.operating_mode is OperatingMode.FREEZE:
             return _failure("freeze_mode")
+
+        active = self._has_active_incident()
+        if active is None:
+            return _failure("drill_failed")
+        if active:
+            return _failure("active_incident_present")
 
         now = self._now()
         healthy, code = self._fresh_healthy_snapshot(now)
