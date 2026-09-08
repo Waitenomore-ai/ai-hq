@@ -1,4 +1,5 @@
 import hmac
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -7,6 +8,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from redis import Redis
 from redis.exceptions import RedisError
 
+from ai_hq.approvals.models import ApprovalState
+from ai_hq.approvals.service import ApprovalService
 from ai_hq.auth.dependencies import SESSION_COOKIE, encode_session_cookie, resolve_request_session
 from ai_hq.auth.passwords import verify_password
 from ai_hq.auth.rate_limit import LoginRateLimiter
@@ -61,6 +64,45 @@ def _origin_is_allowed(request: Request, settings: Settings) -> bool:
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host", request.headers.get("host", ""))
     return hmac.compare_digest(origin.rstrip("/"), f"{scheme}://{host}".rstrip("/"))
+
+
+def _approval_row_is_expired(item) -> bool:
+    from datetime import UTC, datetime
+
+    expires_at = item.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= datetime.now(UTC)
+
+
+def _approval_rows(session_factory) -> list[dict]:
+    service = ApprovalService(session_factory)
+    pending, decided = [], []
+    for item in service.list_requests():
+        plan = item.action_plan if isinstance(item.action_plan, dict) else {}
+        row = {
+            "id": item.id,
+            "mission_id": item.mission_id,
+            "requester_agent": item.requester_agent,
+            "action": item.action,
+            "target": item.target,
+            "risk": item.risk.value,
+            "state": item.state.value,
+            "expires_at": item.expires_at.isoformat(),
+            "decided_at": item.decided_at.isoformat() if item.decided_at else None,
+            "created_at": item.created_at.isoformat(),
+            "change_ref": plan.get("change_ref"),
+            "summary": plan.get("summary"),
+            "changed_files": plan.get("changed_files") or [],
+            "qa_evidence_json": json.dumps(
+                plan.get("qa_evidence") or {},
+                indent=2,
+                sort_keys=True,
+            ),
+            "is_pending": item.state is ApprovalState.PENDING,
+        }
+        (pending if row["is_pending"] else decided).append(row)
+    return pending + decided
 
 
 def install_web_routes(
@@ -181,3 +223,80 @@ def install_web_routes(
         response = RedirectResponse(external_path(settings, "/login"), status_code=303)
         response.delete_cookie(SESSION_COOKIE, path=settings.root_path)
         return response
+
+    @app.get("/approvals", response_class=HTMLResponse)
+    def approvals_page(request: Request):
+        with session_factory() as db:
+            resolved = resolve_request_session(request, db, settings)
+            if resolved is None:
+                return RedirectResponse(
+                    external_path(settings, "/login"),
+                    status_code=303,
+                )
+            _raw_token, record = resolved
+            operating_mode, simulation_mode = _runtime_state(db)
+            csrf_token = record.csrf_token
+
+        return _render(
+            "approvals.html",
+            root_path=settings.root_path.rstrip("/"),
+            csrf_token=csrf_token,
+            operating_mode=operating_mode,
+            simulation_mode=simulation_mode,
+            requests=_approval_rows(session_factory),
+        )
+
+    @app.post("/approvals/{approval_id}/decide")
+    def decide_approval_page(
+        request: Request,
+        approval_id: str,
+        decision: str = Form(...),
+        csrf_token: str = Form(...),
+    ):
+        if not _origin_is_allowed(request, settings):
+            return HTMLResponse("Forbidden", status_code=403)
+
+        with session_factory() as db:
+            resolved = resolve_request_session(request, db, settings)
+            if resolved is None:
+                return JSONResponse(
+                    {"error": "Authentication required"},
+                    status_code=401,
+                )
+            _raw_token, record = resolved
+            if not record.csrf_token or not hmac.compare_digest(
+                csrf_token,
+                record.csrf_token,
+            ):
+                return HTMLResponse("Forbidden", status_code=403)
+
+        mapped = {
+            "approve": ApprovalState.APPROVED,
+            "deny": ApprovalState.DENIED,
+        }.get(decision)
+        if mapped is None:
+            return HTMLResponse("Invalid decision", status_code=422)
+
+        service = ApprovalService(session_factory)
+        try:
+            existing = service.get_request(approval_id)
+        except KeyError:
+            return HTMLResponse("Approval not found", status_code=404)
+
+        if _approval_row_is_expired(existing):
+            return HTMLResponse("Approval request has expired", status_code=410)
+
+        try:
+            service.decide(approval_id, mapped)
+        except KeyError:
+            return HTMLResponse("Approval not found", status_code=404)
+        except ValueError:
+            return HTMLResponse(
+                "Approval request already decided",
+                status_code=409,
+            )
+
+        return RedirectResponse(
+            external_path(settings, "/approvals"),
+            status_code=303,
+        )
