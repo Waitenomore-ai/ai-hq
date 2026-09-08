@@ -16,5 +16,8 @@ FROM base AS web
 CMD ["/app/docker/entrypoint-web.sh"]
 
 FROM base AS worker
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "soup-cli==0.74.0"
 CMD ["/app/docker/entrypoint-worker.sh"]
