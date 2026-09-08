@@ -7,10 +7,16 @@ READ_TOOLS = frozenset(
         "system.health.read",
         "service.status.read",
         "service.logs.read",
+        "dripvid.health.read",
+        "dripvid.release.read",
+        "dripvid.config.read",
+        "dripvid.service.status.read",
     }
 )
 
 TARGET = "ai-hq"
+DRIPVID_TARGET = "dripvid"
+DRIPVID_SERVICES = ("jellyfin", "cloudflared", "dripvid-requests", "dripvid")
 
 MUTATION_PATTERNS = (
     r"\brestart\b",
@@ -44,6 +50,9 @@ class ChatIntent:
 def _step(
     tool_name: str,
     description: str,
+    *,
+    target: str = TARGET,
+    **arguments: object,
 ) -> dict:
     if tool_name not in READ_TOOLS:
         raise ValueError("Tool is not allowed for SysAdmin Chat v1")
@@ -51,7 +60,7 @@ def _step(
     return {
         "description": description,
         "tool_name": tool_name,
-        "tool_arguments": {"target": TARGET},
+        "tool_arguments": {"target": target, **arguments},
     }
 
 
@@ -139,6 +148,104 @@ def _resolve_code_change_repository(text: str) -> str | None:
     return None
 
 
+def _plan_dripvid_read(normalized: str) -> ChatIntent | None:
+    mentions_dripvid = _contains_any(normalized, DRIPVID_TARGET_WORDS)
+    named_service = next(
+        (service for service in DRIPVID_SERVICES if service in normalized),
+        None,
+    )
+
+    if mentions_dripvid and _contains_any(normalized, (" log", "logs", "logging")):
+        return ChatIntent(
+            kind="refused",
+            refusal_reason="DripVid MCP log access is not enabled in the read-only allowlist.",
+        )
+
+    if mentions_dripvid and _contains_any(normalized, ("config", "configuration", "settings")):
+        return ChatIntent(
+            kind="operational",
+            steps=(
+                _step(
+                    "dripvid.config.read",
+                    "Read redacted DripVid configuration",
+                    target=DRIPVID_TARGET,
+                ),
+            ),
+        )
+
+    if mentions_dripvid and _contains_any(
+        normalized,
+        ("version", "deployed", "release", "commit"),
+    ):
+        return ChatIntent(
+            kind="operational",
+            steps=(
+                _step(
+                    "dripvid.release.read",
+                    "Read the deployed DripVid release identity",
+                    target=DRIPVID_TARGET,
+                ),
+            ),
+        )
+
+    service_status_words = (
+        "running",
+        "status",
+        "service up",
+        "service status",
+        "is active",
+    )
+    if named_service and _contains_any(normalized, service_status_words):
+        return ChatIntent(
+            kind="operational",
+            steps=(
+                _step(
+                    "dripvid.service.status.read",
+                    f"Read {named_service} service status through DripVid MCP",
+                    target=DRIPVID_TARGET,
+                    service=named_service,
+                ),
+            ),
+        )
+
+    if mentions_dripvid and _contains_any(
+        normalized,
+        ("health", "healthy", "readiness", "ready", "check dripvid"),
+    ):
+        return ChatIntent(
+            kind="operational",
+            steps=(
+                _step(
+                    "dripvid.health.read",
+                    "Read DripVid application health through MCP",
+                    target=DRIPVID_TARGET,
+                ),
+            ),
+        )
+
+    if mentions_dripvid and _contains_any(
+        normalized,
+        ("how is dripvid", "is dripvid okay", "is dripvid ok"),
+    ):
+        return ChatIntent(
+            kind="operational",
+            steps=(
+                _step(
+                    "dripvid.health.read",
+                    "Read DripVid application health through MCP",
+                    target=DRIPVID_TARGET,
+                ),
+                _step(
+                    "dripvid.release.read",
+                    "Read the deployed DripVid release identity",
+                    target=DRIPVID_TARGET,
+                ),
+            ),
+        )
+
+    return None
+
+
 def plan_sysadmin_intent(text: str) -> ChatIntent:
     normalized = " ".join(text.lower().split())
 
@@ -177,6 +284,10 @@ def plan_sysadmin_intent(text: str) -> ChatIntent:
                 "mutation operations are not enabled."
             ),
         )
+
+    dripvid_read = _plan_dripvid_read(normalized)
+    if dripvid_read is not None:
+        return dripvid_read
 
     wants_logs = _contains_any(
         normalized,
