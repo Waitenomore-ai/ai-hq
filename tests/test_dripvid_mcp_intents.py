@@ -32,6 +32,14 @@ def test_allowlisted_dripvid_service_status_is_explicit():
     assert step["tool_arguments"] == {"target": "dripvid", "service": "jellyfin"}
 
 
+def test_unknown_service_name_is_not_misread_as_dripvid_service():
+    intent = plan_sysadmin_intent("is ssh running on dripvid?")
+    assert intent.kind != "operational" or all(
+        step["tool_arguments"].get("service") != "dripvid"
+        for step in intent.steps
+    )
+
+
 def test_dripvid_logs_are_not_silently_mapped_to_ai_hq_logs():
     intent = plan_sysadmin_intent("show me dripvid logs")
     assert intent.kind == "refused"
