@@ -38,34 +38,42 @@
 
 - [ ] **Step 1: Write failing service contract tests**
 
-Add fixtures using the repository's existing SQLAlchemy test session factory pattern. Create a helper that records a healthy status with `RecoveryStatusService.record_successful_cycle(target="dripvid", observed_at=now, summary={"reachable": True, "status_code": 200, "ready": True})`.
-
-Cover these exact cases:
+Follow the existing SQLAlchemy test session factory pattern in the recovery tests. Add a helper:
 
 ```python
-def test_drill_refuses_when_recovery_disabled(...):
-    result = service.run(settings=settings.model_copy(update={"recovery_enabled": False}))
+def record_healthy_status(status_service, now):
+    return status_service.record_successful_cycle(
+        target="dripvid",
+        observed_at=now,
+        summary={"reachable": True, "status_code": 200, "ready": True},
+    )
+```
+
+Add explicit tests with deterministic `now` and an injected clock:
+
+```python
+def test_drill_refuses_when_recovery_disabled(settings, service):
+    result = service.run(
+        settings=settings.model_copy(update={"recovery_enabled": False})
+    )
     assert result == {"ok": False, "code": "recovery_disabled"}
 
 
-def test_drill_refuses_when_observe_only_disabled(...):
-    result = service.run(settings=settings.model_copy(update={"recovery_observe_only": False}))
+def test_drill_refuses_when_observe_only_disabled(settings, service):
+    result = service.run(
+        settings=settings.model_copy(update={"recovery_observe_only": False})
+    )
     assert result == {"ok": False, "code": "observe_only_required"}
 
 
-def test_drill_refuses_in_freeze_mode(...):
-    result = service.run(settings=settings.model_copy(update={"operating_mode": OperatingMode.FREEZE}))
+def test_drill_refuses_in_freeze_mode(settings, service):
+    result = service.run(
+        settings=settings.model_copy(update={"operating_mode": OperatingMode.FREEZE})
+    )
     assert result == {"ok": False, "code": "freeze_mode"}
-
-
-def test_drill_requires_fresh_healthy_status(...):
-    # unknown/unhealthy/missing and >5-second-old healthy snapshots all fail closed.
-    ...
-
-
-def test_drill_refuses_any_existing_active_dripvid_incident(...):
-    ...
 ```
+
+Add separate explicit tests for missing status, unhealthy status, stale healthy status older than five seconds, a future healthy timestamp, and any existing active DripVid incident. Expected codes are respectively `healthy_status_required`, `healthy_status_required`, `fresh_healthy_probe_required`, `fresh_healthy_probe_required`, and `active_incident_present`.
 
 - [ ] **Step 2: Write failing success-path assertions**
 
@@ -99,11 +107,23 @@ assert result == {
 
 - [ ] **Step 3: Write failing idempotency/race tests**
 
-Test that a second invocation while the drill incident is active returns `active_incident_present`, and simulate an integrity conflict so the result is the fixed code `drill_conflict` with no exception text.
+Run the drill once successfully, then call it again before healthy resolution and assert:
+
+```python
+assert second_result == {"ok": False, "code": "active_incident_present"}
+```
+
+Patch the insert/commit boundary to raise SQLAlchemy `IntegrityError` and assert:
+
+```python
+assert result == {"ok": False, "code": "drill_conflict"}
+```
+
+Also assert the rendered/serialized result contains neither the exception class name nor the database message.
 
 - [ ] **Step 4: Extend the security-boundary regression**
 
-In `tests/test_recovery_security_boundary.py`, inspect `src/ai_hq/recovery/drill.py` source and fail if it contains imports/calls for `subprocess`, `os.system`, `docker`, `systemctl`, `service_restart`, `service.recover`, deployment helpers, or Host Helper mutation executors. Also assert the CLI exposes no configurable target/component/url/command/threshold options.
+In `tests/test_recovery_security_boundary.py`, read `src/ai_hq/recovery/drill.py` and assert forbidden tokens/imports are absent: `subprocess`, `os.system`, `docker`, `systemctl`, `service_restart`, `service.recover`, deployment helper imports, Host Helper mutation executor imports, and `RecoveryObserver`. Assert the CLI parser defines only `--json` beyond built-in help.
 
 - [ ] **Step 5: Run RED verification**
 
@@ -131,8 +151,8 @@ git commit -m "test: define observe-only recovery drill contract"
 - Test: `tests/test_recovery_drill.py`
 
 **Interfaces:**
-- Consumes: `SessionFactory`, `Settings`, `OperatingMode`, `RecoveryIncident`, `RecoveryIncidentState`, `RecoveryAttempt`, `RecoveryStatusService`.
-- Produces: `RecoveryDrillService(session_factory, *, clock=None)`, `RecoveryDrillService.run(*, settings: Settings) -> dict[str, object]`.
+- Consumes: session factory callable, `Settings`, `OperatingMode`, `RecoveryIncident`, `RecoveryIncidentState`, `RecoveryAttempt`, `RecoveryStatusService`.
+- Produces: `RecoveryDrillService(session_factory, *, clock=None)` and `RecoveryDrillService.run(*, settings: Settings) -> dict[str, object]`.
 
 - [ ] **Step 1: Add fixed constants and bounded result helpers**
 
@@ -154,7 +174,12 @@ _UNHEALTHY_SUMMARY = {
 }
 ```
 
-Add `_failure(code: str) -> dict[str, object]` returning only `{"ok": False, "code": code}`.
+Add:
+
+```python
+def _failure(code: str) -> dict[str, object]:
+    return {"ok": False, "code": code}
+```
 
 - [ ] **Step 2: Implement fail-closed preconditions**
 
@@ -169,11 +194,20 @@ if settings.operating_mode is OperatingMode.FREEZE:
     return _failure("freeze_mode")
 ```
 
-Read `RecoveryStatusService.snapshot("dripvid")`. Require `last_result == "healthy"`, `ready is True`, no active incident metadata, a non-null `last_probe_at`, and age in `[0, 5]` seconds. Use timezone-normalized UTC comparison; future timestamps fail with `fresh_healthy_probe_required`.
+Read `RecoveryStatusService(session_factory).snapshot("dripvid")`. Require `last_result == "healthy"`, `ready is True`, no active incident metadata, and non-null `last_probe_at`. If the snapshot is missing/unhealthy/unknown/error return `healthy_status_required`. Normalize both timestamps to UTC, compute `age = now - last_probe_at`, and require `0 <= age.total_seconds() <= 5`; otherwise return `fresh_healthy_probe_required`.
 
 - [ ] **Step 3: Implement the atomic incident insertion**
 
-Within one SQLAlchemy session/transaction, query for **any** row where `RecoveryIncident.target == "dripvid"` and `active_key IS NOT NULL`; if one exists return `active_incident_present` before writing.
+Within one SQLAlchemy session, query:
+
+```python
+select(RecoveryIncident).where(
+    RecoveryIncident.target == "dripvid",
+    RecoveryIncident.active_key.is_not(None),
+).limit(1)
+```
+
+If a row exists, rollback/exit without writes and return `active_incident_present`.
 
 Insert exactly:
 
@@ -193,7 +227,7 @@ incident = RecoveryIncident(
 )
 ```
 
-Commit and refresh. Catch only database integrity/concurrency failure at the transaction boundary and return `drill_conflict`; do not include exception text.
+Commit and refresh. Catch `sqlalchemy.exc.IntegrityError` at this transaction boundary, rollback, and return `drill_conflict`; never include exception text.
 
 - [ ] **Step 4: Project existing bounded recovery status**
 
@@ -207,11 +241,29 @@ snapshot = RecoveryStatusService(session_factory).record_successful_cycle(
 )
 ```
 
-Verify snapshot is unhealthy, `ready is False`, active incident ID matches, active state is `suspect`, and consecutive failures equal `settings.recovery_failure_threshold`.
+Require:
+
+```python
+snapshot["last_result"] == "unhealthy"
+snapshot["ready"] is False
+snapshot["active_incident_id"] == incident.id
+snapshot["active_incident_state"] == "suspect"
+snapshot["consecutive_failures"] == settings.recovery_failure_threshold
+```
+
+If any requirement fails, return `status_verification_failed`.
 
 - [ ] **Step 5: Verify no mutation artifacts were created**
 
-Read the incident again and query `RecoveryAttempt` count for its ID. Require `recovery_mission_id is None` and attempt count `0`. If not, return `status_verification_failed`; do not invoke cleanup/recovery mutation from the drill.
+Read the incident again and query:
+
+```python
+select(func.count()).select_from(RecoveryAttempt).where(
+    RecoveryAttempt.incident_id == incident.id
+)
+```
+
+Require `incident.recovery_mission_id is None` and attempt count equals `0`. If either fails, return `status_verification_failed`; do not invoke cleanup or recovery mutation from the drill.
 
 - [ ] **Step 6: Return bounded success result**
 
@@ -230,7 +282,7 @@ Return exactly:
 }
 ```
 
-Unexpected exceptions must collapse to `{"ok": False, "code": "drill_failed"}` without printing or persisting exception text.
+Wrap the public `run()` boundary so unexpected exceptions collapse to `{"ok": False, "code": "drill_failed"}` without printing or persisting exception text.
 
 - [ ] **Step 7: Run GREEN verification**
 
@@ -257,14 +309,26 @@ git commit -m "feat: add guarded observe-only recovery drill"
 - Test: `tests/test_recovery_drill.py`
 
 **Interfaces:**
-- Consumes: `get_settings()`, application session factory used by recovery bootstrap, `RecoveryDrillService.run()`.
+- Consumes: `get_settings()`, the application session factory used by recovery bootstrap, `RecoveryDrillService.run()`.
 - Produces: `python -m ai_hq.recovery.drill` and optional `--json` output formatting only.
 
 - [ ] **Step 1: Write failing CLI tests**
 
-Test parser behavior so these are rejected with non-zero status: `--target`, `--component`, `--url`, `--command`, `--threshold`, positional arguments, and unknown flags. Only no arguments and optional `--json` are accepted.
+Parameterize invalid argument vectors:
 
-Test that JSON output contains only the bounded service result fields and never settings/environment/diagnostics.
+```python
+[
+    ["--target", "dripvid"],
+    ["--component", "app"],
+    ["--url", "http://127.0.0.1"],
+    ["--command", "restart"],
+    ["--threshold", "2"],
+    ["dripvid"],
+    ["--unknown"],
+]
+```
+
+Each must be rejected by the parser with non-zero status. No arguments and `--json` must be accepted. Test that JSON output contains only the bounded service result keys and never settings, environment values, diagnostics, URLs, paths, logs, or exception text.
 
 - [ ] **Step 2: Implement minimal CLI**
 
@@ -274,9 +338,9 @@ Use `argparse.ArgumentParser` with only:
 parser.add_argument("--json", action="store_true")
 ```
 
-Build the production session factory using the same database/bootstrap mechanism already used by recovery runtime. Load `get_settings()`. Invoke `RecoveryDrillService.run(settings=settings)` once. Return exit code `0` only when `result["ok"] is True`; otherwise non-zero.
+Build the production session factory using the same database/bootstrap mechanism already used by recovery runtime. Load `get_settings()`. Invoke `RecoveryDrillService.run(settings=settings)` once. Return exit code `0` only when `result["ok"] is True`; otherwise return a non-zero code.
 
-For `--json`, print `json.dumps(result, sort_keys=True)`. For normal output, print a bounded one-line success/failure summary assembled only from keys in `result`.
+For `--json`, print `json.dumps(result, sort_keys=True)`. For normal output, print one bounded line assembled only from keys already present in `result`.
 
 - [ ] **Step 3: Run focused tests**
 
@@ -304,12 +368,12 @@ git commit -m "feat: expose one-shot recovery drill cli"
 - Modify: `tests/test_recovery_security_boundary.py`
 
 **Interfaces:**
-- Consumes: deployed recovery cycle/coordinator healthy-resolution behavior, `RecoveryStatusService.snapshot()`.
+- Consumes: existing normal recovery cycle/coordinator healthy-resolution behavior and `RecoveryStatusService.snapshot()`.
 - Produces: regression proof that the drill leaves resolution to normal recovery and cannot reach mutation authority.
 
 - [ ] **Step 1: Add integration test for healthy resolution**
 
-Arrange a fresh healthy status, run the drill, assert the status is unhealthy with an active synthetic incident, then drive the existing normal healthy recovery cycle once using its existing fake readiness probe. Assert afterward:
+Arrange a fresh healthy status, run the drill, assert the status is unhealthy with an active synthetic incident, then drive the existing normal healthy recovery cycle once using its current fake readiness probe fixture. Assert afterward:
 
 ```python
 snapshot = RecoveryStatusService(session_factory).snapshot("dripvid")
@@ -320,11 +384,18 @@ assert snapshot["active_incident_state"] is None
 assert snapshot["consecutive_failures"] == 0
 ```
 
-Also assert the drill incident is `RESOLVED` and still has no mission/attempt.
+Reload the drill incident and assert:
+
+```python
+assert incident.state is RecoveryIncidentState.RESOLVED
+assert incident.active_key is None
+assert incident.recovery_mission_id is None
+assert attempt_count == 0
+```
 
 - [ ] **Step 2: Strengthen security assertions**
 
-Assert the drill module does not import `RecoveryObserver`, Tool Gateway execution, Host Helper executors, deployment modules, `subprocess`, or service mutation adapters. Assert no new `service.recover` permission or approval path was added anywhere in files changed by this feature.
+Assert the drill module does not import `RecoveryObserver`, Tool Gateway execution code, Host Helper executors, deployment modules, `subprocess`, or service mutation adapters. Compare the feature branch diff to `main` and assert no config defaults, recovery permissions, approval policy, Host Helper capabilities, service mappings, deployment scripts, or UI controls changed.
 
 - [ ] **Step 3: Run recovery-focused suite**
 
@@ -355,7 +426,7 @@ git commit -m "test: prove recovery drill resolves through healthy worker"
 **Interfaces:**
 - Produces exact-SHA evidence suitable for merge/deployment review.
 
-- [ ] **Step 1: Run full local verification where a runner is available**
+- [ ] **Step 1: Run full verification where a runner is available**
 
 ```bash
 python -m ruff check src tests
@@ -369,37 +440,37 @@ Expected: all pass.
 
 Verify changed functional scope is limited to the drill module/tests and docs. Confirm no config default, recovery permission, approval policy, Host Helper capability, service mapping, deployment script, or UI mutation control changed.
 
-- [ ] **Step 3: Push/open draft PR and use GitHub Actions as authoritative runner**
+- [ ] **Step 3: Open a draft PR and use GitHub Actions as authoritative runner**
 
-Create a draft PR from `feature/recovery-drill` to `main`. Record exact branch head SHA and CI run ID. Require Install, Lint, Test, and Validate Compose to all succeed for that exact SHA/merge result.
+Create a draft PR from `feature/recovery-drill` to `main`. Record exact branch head SHA and CI run ID. Require Install, Lint, Test, and Validate Compose to all succeed for that exact SHA or GitHub merge result.
 
 - [ ] **Step 4: Review CI logs**
 
-Confirm Ruff passes, full pytest count is green, and Compose validation succeeds. If a failure appears, use systematic debugging; do not weaken the drill safety assertions to make CI pass.
+Confirm Ruff passes, the full pytest suite is green, and Compose validation succeeds. If a failure appears, use systematic debugging; do not weaken drill safety assertions merely to make CI pass.
 
 - [ ] **Step 5: Integration gate**
 
-Do not merge automatically. Present the verified PR/head SHA for human integration choice. After merge, verify the exact `main` merge SHA CI again before production deployment.
+Do not merge automatically. Present the verified PR/head SHA for human integration choice. After merge, verify exact `main` merge SHA CI again before production deployment.
 
 ---
 
 ## Production Drill Procedure After Merge and Explicit Deploy Authorization
 
-Deployment is separate from implementation/merge. After the exact merged SHA is deployed through `deploy/ai-hq-deploy` and `deploy/check-production.sh` passes:
+Deployment is separate from implementation and merge. After the exact merged SHA is deployed through `deploy/ai-hq-deploy` and `deploy/check-production.sh` passes:
 
 1. Verify `AI_HQ_RECOVERY_ENABLED=true` and `AI_HQ_RECOVERY_OBSERVE_ONLY=true`.
-2. Verify DripVid is healthy and AI HQ Recovery card is healthy.
-3. Run the drill **inside the worker container only**:
+2. Verify DripVid is healthy and the AI HQ Recovery card is healthy.
+3. Run the drill inside the worker container only:
 
 ```bash
 docker compose -p ai-hq --env-file /etc/ai-hq/ai-hq.env -f /opt/ai-hq/app/compose.yaml exec -T worker \
   python -m ai_hq.recovery.drill --json
 ```
 
-4. Confirm returned result is bounded and `ok=true`.
+4. Confirm the returned result is bounded and `ok=true`.
 5. Confirm DripVid remains continuously reachable; do not restart or alter it.
-6. Confirm Recovery card briefly shows unhealthy/active incident.
+6. Confirm the Recovery card briefly shows unhealthy with an active incident.
 7. Confirm no recovery mission or attempt appears.
 8. Allow the normal healthy worker cycle to resolve the synthetic incident.
-9. Confirm Recovery card returns to healthy.
+9. Confirm the Recovery card returns to healthy.
 10. Stop. Do not disable observe-only or authorize real recovery as part of this milestone.
