@@ -67,3 +67,18 @@ def test_host_helper_installer_restores_nonsecret_umask_and_secures_venv():
     assert 'chown -R root:ai-hq-helper "$VENV"' in text
     assert 'chmod -R u+rwX,g+rX,o-rwx "$VENV"' in text
     assert 'runuser -u ai-hq-helper -- "$VENV/bin/python" -c' in text
+
+
+def test_deploy_script_requires_fixed_dripvid_mcp_socket_and_secure_token_source():
+    text = Path("deploy/ai-hq-deploy").read_text()
+
+    assert "DRIPVID_MCP_SOCKET=/run/dripvid-mcp/mcp.sock" in text
+    assert "DRIPVID_MCP_TOKEN_SOURCE=/etc/ai-hq/dripvid-mcp.token" in text
+    assert 'test -S "$DRIPVID_MCP_SOCKET"' in text
+    assert (
+        "AI_HQ_DRIPVID_MCP_TOKEN_SOURCE=/etc/ai-hq/dripvid-mcp.token"
+        in text
+    )
+    assert "AI_HQ_DRIPVID_MCP_SOCKET=/run/dripvid-mcp/mcp.sock" in text
+    assert "AI_HQ_DRIPVID_MCP_TOKEN_FILE=/run/secrets/dripvid-mcp-token" in text
+    assert "DripVid MCP token file permissions are too broad" in text
