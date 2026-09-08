@@ -28,12 +28,21 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config
-      - name: Verify worker-only Soup image
+      - name: Verify worker-only toolchain and Soup image
         run: |
           docker build --target web -t ai-hq-soup-test-web .
           docker build --target worker -t ai-hq-soup-test-worker .
-          docker run --rm ai-hq-soup-test-worker soup --help >/dev/null
-          if docker run --rm ai-hq-soup-test-web sh -c 'command -v soup >/dev/null'; then
-            echo 'Soup must not be installed in the web image' >&2
+          docker run --rm ai-hq-soup-test-worker sh -eu -c '
+            command -v git >/dev/null
+            command -v node >/dev/null
+            command -v npm >/dev/null
+            command -v soup >/dev/null
+            git --version
+            node --version
+            npm --version
+            soup --help >/dev/null
+          '
+          if docker run --rm ai-hq-soup-test-web sh -c 'command -v soup >/dev/null || command -v git >/dev/null || command -v node >/dev/null || command -v npm >/dev/null'; then
+            echo 'Worker-only verification tools must not be installed in the web image' >&2
             exit 1
           fi
