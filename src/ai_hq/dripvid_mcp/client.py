@@ -17,7 +17,7 @@ class DripVidMcpClient:
         token: str,
         socket_path: str = "/run/dripvid-mcp/mcp.sock",
         timeout_seconds: float = 5.0,
-        transport: httpx.AsyncBaseTransport | None = None,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         if not token or any(character.isspace() for character in token):
             raise ValueError("DripVid MCP token is invalid")
@@ -27,38 +27,38 @@ class DripVidMcpClient:
             raise ValueError("DripVid MCP timeout is outside the allowed range")
 
         self.socket_path = socket_path
-        self.base_url = "http://dripvid-mcp"
+        self.base_url = "http://localhost"
         self._token = token
         self._session_id: str | None = None
         self._initialized = False
         self._next_id = 1
         if transport is None:
-            transport = httpx.AsyncHTTPTransport(uds=socket_path)
-        self._client = httpx.AsyncClient(
+            transport = httpx.HTTPTransport(uds=socket_path)
+        self._client = httpx.Client(
             transport=transport,
             base_url=self.base_url,
             timeout=timeout_seconds,
             follow_redirects=False,
         )
 
-    async def aclose(self) -> None:
-        await self._client.aclose()
+    def close(self) -> None:
+        self._client.close()
 
-    async def dripvid_health(self) -> str:
-        return await self._call_tool("dripvid_health", {})
+    def dripvid_health(self) -> str:
+        return self._call_tool("dripvid_health", {})
 
-    async def dripvid_git_status(self) -> str:
-        return await self._call_tool("dripvid_git_status", {})
+    def dripvid_git_status(self) -> str:
+        return self._call_tool("dripvid_git_status", {})
 
-    async def dripvid_config(self) -> str:
-        return await self._call_tool("dripvid_config", {})
+    def dripvid_config(self) -> str:
+        return self._call_tool("dripvid_config", {})
 
-    async def service_status(self, service: str) -> str:
+    def service_status(self, service: str) -> str:
         if service not in _ALLOWED_SERVICES:
             raise ValueError("DripVid MCP service is not allowlisted")
-        return await self._call_tool("service_status", {"service": service})
+        return self._call_tool("service_status", {"service": service})
 
-    async def _initialize(self) -> None:
+    def _initialize(self) -> None:
         if self._initialized:
             return
         request_id = self._allocate_id()
@@ -72,18 +72,42 @@ class DripVidMcpClient:
                 "clientInfo": {"name": "ai-hq", "version": "0.1.0"},
             },
         }
-        result, headers = await self._post_rpc(payload, request_id=request_id, initialized=False)
+        result, headers = self._post_rpc(
+            payload,
+            request_id=request_id,
+            initialized=False,
+        )
         if not isinstance(result, Mapping):
             raise ValueError("DripVid MCP initialization response is invalid")
-        if not isinstance(result.get("protocolVersion"), str):
+        protocol_version = result.get("protocolVersion")
+        if not isinstance(protocol_version, str) or protocol_version != _PROTOCOL_VERSION:
             raise ValueError("DripVid MCP initialization response is invalid")
         session_id = headers.get("mcp-session-id")
         if session_id:
             self._session_id = session_id
+        self._send_initialized_notification()
         self._initialized = True
 
-    async def _call_tool(self, name: str, arguments: dict[str, object]) -> str:
-        await self._initialize()
+    def _send_initialized_notification(self) -> None:
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+        }
+        response = self._post(
+            payload,
+            initialized=True,
+        )
+        if 300 <= response.status_code < 400:
+            raise ValueError("DripVid MCP redirects are not allowed")
+        if response.status_code not in {200, 202, 204}:
+            try:
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise ValueError("DripVid MCP initialization notification failed") from exc
+            raise ValueError("DripVid MCP initialization notification failed")
+
+    def _call_tool(self, name: str, arguments: dict[str, object]) -> str:
+        self._initialize()
         request_id = self._allocate_id()
         payload = {
             "jsonrpc": "2.0",
@@ -91,7 +115,7 @@ class DripVidMcpClient:
             "method": "tools/call",
             "params": {"name": name, "arguments": arguments},
         }
-        result, _headers = await self._post_rpc(
+        result, _headers = self._post_rpc(
             payload,
             request_id=request_id,
             initialized=True,
@@ -116,13 +140,7 @@ class DripVidMcpClient:
         self._next_id += 1
         return request_id
 
-    async def _post_rpc(
-        self,
-        payload: dict[str, object],
-        *,
-        request_id: int,
-        initialized: bool,
-    ) -> tuple[object, httpx.Headers]:
+    def _headers(self, *, initialized: bool) -> dict[str, str]:
         headers = {
             "authorization": f"Bearer {self._token}",
             "content-type": "application/json",
@@ -132,20 +150,46 @@ class DripVidMcpClient:
             headers["mcp-protocol-version"] = _PROTOCOL_VERSION
             if self._session_id:
                 headers["mcp-session-id"] = self._session_id
+        return headers
 
-        response = await self._client.post("/mcp", headers=headers, json=payload)
+    def _post(
+        self,
+        payload: dict[str, object],
+        *,
+        initialized: bool,
+    ) -> httpx.Response:
+        try:
+            return self._client.post(
+                "/mcp",
+                headers=self._headers(initialized=initialized),
+                json=payload,
+            )
+        except httpx.HTTPError as exc:
+            raise ValueError("DripVid MCP transport failed") from exc
+
+    def _post_rpc(
+        self,
+        payload: dict[str, object],
+        *,
+        request_id: int,
+        initialized: bool,
+    ) -> tuple[object, httpx.Headers]:
+        response = self._post(payload, initialized=initialized)
         if 300 <= response.status_code < 400:
             raise ValueError("DripVid MCP redirects are not allowed")
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise ValueError("DripVid MCP request failed") from exc
 
         content_length = response.headers.get("content-length")
         if content_length is not None:
             try:
-                if int(content_length) > _MAX_RESPONSE_BYTES:
-                    raise ValueError("DripVid MCP response is too large")
+                parsed_length = int(content_length)
             except ValueError as exc:
-                if str(exc) == "DripVid MCP response is too large":
-                    raise
+                raise ValueError("DripVid MCP response length is invalid") from exc
+            if parsed_length > _MAX_RESPONSE_BYTES:
+                raise ValueError("DripVid MCP response is too large")
         body = response.content
         if len(body) > _MAX_RESPONSE_BYTES:
             raise ValueError("DripVid MCP response is too large")
