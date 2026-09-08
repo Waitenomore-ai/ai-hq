@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -60,6 +61,14 @@ Requirements:
 - Do not include Markdown fences.
 - Do not include prose outside the JSON object.
 """.strip()
+
+
+_DEVELOPER_RETRY_INSTRUCTION = (
+    "Your previous response could not be parsed as the required JSON object. "
+    "Return ONLY the valid JSON object with exactly the fields \"summary\" and "
+    "\"changes\" as specified in the system instructions. Do not include "
+    "Markdown fences, prose, or any other content."
+)
 
 
 _QA_SYSTEM_PROMPT = """
@@ -133,6 +142,32 @@ def _parse_json_object(
     return parsed
 
 
+_JSON_FENCED_PATTERN = re.compile(
+    r"\s*```(?:json)?[ \t]*\r?\n(?P<body>.*?)\r?\n?[ \t]*```\s*",
+    re.DOTALL,
+)
+
+
+def _parse_json_envelope(raw: str, *, source: str) -> dict[str, Any]:
+    """Parse the required JSON object, tolerating one Markdown fence.
+
+    Bare JSON is accepted directly. A response wrapped in exactly one JSON
+    Markdown fence is also accepted, because models fence JSON in practice
+    despite instructions. Any other surrounding prose is rejected so the
+    caller can trigger a controlled retry.
+    """
+    try:
+        return _parse_json_object(raw, source=source)
+    except ValueError:
+        pass
+
+    match = _JSON_FENCED_PATTERN.fullmatch(raw)
+    if match is None:
+        raise ValueError(f"{source} must return valid JSON") from None
+
+    return _parse_json_object(match.group("body"), source=source)
+
+
 def _validate_developer_change(raw_change: Any, *, index: int) -> dict[str, Any]:
     if not isinstance(raw_change, dict):
         raise ValueError(f"Developer change {index} must be an object")
@@ -186,38 +221,27 @@ class ModelBackedDeveloperAgent:
             supplied = self.context_provider(mission_id)
 
             if not isinstance(supplied, dict):
-                raise ValueError(
-                    "Developer context provider must return a mapping"
-                )
+                raise ValueError("Developer context provider must return a mapping")
 
             repository = supplied.get("repository")
             instruction = supplied.get("instruction")
             files = supplied.get("files")
 
             if repository not in {"ai-hq", "dripvid"}:
-                raise ValueError(
-                    "Developer context requires trusted repository"
-                )
+                raise ValueError("Developer context requires trusted repository")
 
             if not isinstance(instruction, str) or not instruction.strip():
-                raise ValueError(
-                    "Developer context requires instruction"
-                )
+                raise ValueError("Developer context requires instruction")
 
             if not isinstance(files, list):
-                raise ValueError(
-                    "Developer context files must be a list"
-                )
+                raise ValueError("Developer context files must be a list")
 
             complete_context_paths: set[str] = set()
-
             sanitized_files = []
 
             for index, item in enumerate(files):
                 if not isinstance(item, dict):
-                    raise ValueError(
-                        f"Developer context file {index} must be an object"
-                    )
+                    raise ValueError(f"Developer context file {index} must be an object")
 
                 path = item.get("path")
                 content = item.get("content")
@@ -228,21 +252,13 @@ class ModelBackedDeveloperAgent:
                     or not path.strip()
                     or not isinstance(content, str)
                 ):
-                    raise ValueError(
-                        f"Developer context file {index} is invalid"
-                    )
+                    raise ValueError(f"Developer context file {index} is invalid")
 
                 if complete is not True:
-                    # Partial source must never be writable by a
-                    # whole-file Developer change.
                     continue
 
                 normalized_path = path.strip()
-
-                complete_context_paths.add(
-                    normalized_path
-                )
-
+                complete_context_paths.add(normalized_path)
                 sanitized_files.append(
                     {
                         "path": normalized_path,
@@ -255,32 +271,43 @@ class ModelBackedDeveloperAgent:
                 "repository": repository,
                 "instruction": instruction.strip(),
                 "files": sanitized_files,
-                "writable_paths": sorted(
-                    complete_context_paths
-                ),
+                "writable_paths": sorted(complete_context_paths),
             }
 
-        raw = self.model_client.reply(
-            _DEVELOPER_SYSTEM_PROMPT,
-            [
+        messages = [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "mission_id": mission_id,
+                        "instruction": (
+                            "Produce the structured Developer repository "
+                            "file changes for this mission."
+                        ),
+                        "repository_context": repository_context,
+                    },
+                    sort_keys=True,
+                ),
+            }
+        ]
+
+        raw = self.model_client.reply(_DEVELOPER_SYSTEM_PROMPT, messages)
+
+        try:
+            candidate = _parse_json_envelope(raw, source="Developer")
+        except ValueError:
+            retry_messages = [
+                *messages,
                 {
                     "role": "user",
-                    "content": json.dumps(
-                        {
-                            "mission_id": mission_id,
-                            "instruction": (
-                                "Produce the structured Developer repository "
-                                "file changes for this mission."
-                            ),
-                            "repository_context": repository_context,
-                        },
-                        sort_keys=True,
-                    ),
-                }
-            ],
-        )
-
-        candidate = _parse_json_object(raw, source="Developer")
+                    "content": _DEVELOPER_RETRY_INSTRUCTION,
+                },
+            ]
+            retry_raw = self.model_client.reply(
+                _DEVELOPER_SYSTEM_PROMPT,
+                retry_messages,
+            )
+            candidate = _parse_json_envelope(retry_raw, source="Developer")
 
         forbidden = sorted(_DEVELOPER_FORBIDDEN_FIELDS.intersection(candidate))
         if forbidden:
