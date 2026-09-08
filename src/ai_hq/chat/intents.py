@@ -16,7 +16,7 @@ READ_TOOLS = frozenset(
 
 TARGET = "ai-hq"
 DRIPVID_TARGET = "dripvid"
-DRIPVID_SERVICES = ("jellyfin", "cloudflared", "dripvid-requests", "dripvid")
+DRIPVID_SERVICES = ("jellyfin", "cloudflared", "dripvid-requests")
 
 MUTATION_PATTERNS = (
     r"\brestart\b",
@@ -148,12 +148,26 @@ def _resolve_code_change_repository(text: str) -> str | None:
     return None
 
 
+def _explicit_dripvid_service(normalized: str) -> str | None:
+    for service in DRIPVID_SERVICES:
+        if re.search(rf"(?<![\w-]){re.escape(service)}(?![\w-])", normalized):
+            return service
+
+    dripvid_service_patterns = (
+        r"\bdripvid\s+service\b",
+        r"\bservice\s+dripvid\b",
+        r"\bis\s+dripvid\s+(?:running|active|up)\b",
+        r"\bdripvid\s+(?:service\s+)?status\b",
+        r"\bstatus\s+of\s+dripvid\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in dripvid_service_patterns):
+        return "dripvid"
+    return None
+
+
 def _plan_dripvid_read(normalized: str) -> ChatIntent | None:
     mentions_dripvid = _contains_any(normalized, DRIPVID_TARGET_WORDS)
-    named_service = next(
-        (service for service in DRIPVID_SERVICES if service in normalized),
-        None,
-    )
+    named_service = _explicit_dripvid_service(normalized)
 
     if mentions_dripvid and _contains_any(normalized, (" log", "logs", "logging")):
         return ChatIntent(
