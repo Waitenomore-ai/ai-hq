@@ -8,19 +8,19 @@ class FakeMcpClient:
     def __init__(self):
         self.calls = []
 
-    async def dripvid_health(self):
+    def dripvid_health(self):
         self.calls.append(("dripvid_health", None))
         return "healthy"
 
-    async def dripvid_git_status(self):
+    def dripvid_git_status(self):
         self.calls.append(("dripvid_git_status", None))
         return "release"
 
-    async def dripvid_config(self):
+    def dripvid_config(self):
         self.calls.append(("dripvid_config", None))
         return "redacted"
 
-    async def service_status(self, service):
+    def service_status(self, service):
         self.calls.append(("service_status", service))
         return f"{service}: active"
 
