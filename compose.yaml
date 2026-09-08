@@ -1,6 +1,8 @@
 services:
   web:
-    build: .
+    build:
+      context: .
+      target: web
     command:
     - /app/docker/entrypoint-web.sh
     env_file:
@@ -28,7 +30,9 @@ services:
     volumes:
     - /opt/ai-hq/repository-mirrors:/srv/ai-hq/repository-mirrors:ro
   worker:
-    build: .
+    build:
+      context: .
+      target: worker
     command:
     - /app/docker/entrypoint-worker.sh
     env_file:
