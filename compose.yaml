@@ -27,11 +27,6 @@ services:
       retries: 3
     volumes:
     - /opt/ai-hq/repository-mirrors:/srv/ai-hq/repository-mirrors:ro
-    - /run/dripvid-mcp:/run/dripvid-mcp:ro
-    secrets:
-    - source: dripvid_mcp_token
-      target: dripvid-mcp-token
-      mode: 0400
   worker:
     build: .
     command:
@@ -45,11 +40,15 @@ services:
         condition: service_healthy
     volumes:
     - /run/ai-hq:/run/ai-hq:ro
+    - /run/dripvid-mcp:/run/dripvid-mcp:ro
     - /opt/ai-hq/repository-mirrors:/srv/ai-hq/repository-mirrors:ro
     - /opt/ai-hq/repository-sandboxes:/srv/ai-hq/repository-sandboxes
     secrets:
     - source: ai_hq_github_publisher_token
       target: ai-hq-github-publisher-token
+      mode: 0400
+    - source: dripvid_mcp_token
+      target: dripvid-mcp-token
       mode: 0400
     networks:
     - ai_hq
