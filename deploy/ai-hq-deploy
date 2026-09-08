@@ -6,6 +6,8 @@ RELEASES="$BASE/releases"
 APP_LINK="$BASE/app"
 ENV_FILE=/etc/ai-hq/ai-hq.env
 PUBLISH_TOKEN_SOURCE=/etc/ai-hq/github-publisher.token
+DRIPVID_MCP_SOCKET=/run/dripvid-mcp/mcp.sock
+DRIPVID_MCP_TOKEN_SOURCE=/etc/ai-hq/dripvid-mcp.token
 KEEP_RELEASES=5
 
 fail(){ echo "ai-hq-deploy: $*" >&2; exit 1; }
@@ -38,6 +40,17 @@ TOKEN_UID="$(stat -c '%u' "$PUBLISH_TOKEN_SOURCE")"
 [[ "$TOKEN_UID" == "0" ]] || fail "GitHub publisher token file must be owned by root"
 (( (8#$TOKEN_MODE & 077) == 0 )) || fail "GitHub publisher token file permissions are too broad"
 grep -q '[^[:space:]]' "$PUBLISH_TOKEN_SOURCE" || fail "GitHub publisher token file is empty"
+
+grep -Fxq 'AI_HQ_DRIPVID_MCP_SOCKET=/run/dripvid-mcp/mcp.sock' "$ENV_FILE" || fail "DripVid MCP socket path is missing"
+grep -Fxq 'AI_HQ_DRIPVID_MCP_TOKEN_FILE=/run/secrets/dripvid-mcp-token' "$ENV_FILE" || fail "DripVid MCP container token path is missing"
+grep -Fxq 'AI_HQ_DRIPVID_MCP_TOKEN_SOURCE=/etc/ai-hq/dripvid-mcp.token' "$ENV_FILE" || fail "DripVid MCP token source is missing"
+test -S "$DRIPVID_MCP_SOCKET" || fail "DripVid MCP socket is missing; deploy the DripVid MCP service first"
+[[ -f "$DRIPVID_MCP_TOKEN_SOURCE" && ! -L "$DRIPVID_MCP_TOKEN_SOURCE" ]] || fail "DripVid MCP token file must be a regular non-symlink file"
+MCP_TOKEN_MODE="$(stat -c '%a' "$DRIPVID_MCP_TOKEN_SOURCE")"
+MCP_TOKEN_UID="$(stat -c '%u' "$DRIPVID_MCP_TOKEN_SOURCE")"
+[[ "$MCP_TOKEN_UID" == "0" ]] || fail "DripVid MCP token file must be owned by root"
+(( (8#$MCP_TOKEN_MODE & 077) == 0 )) || fail "DripVid MCP token file permissions are too broad"
+grep -Eq '^[^[:space:]]+$' "$DRIPVID_MCP_TOKEN_SOURCE" || fail "DripVid MCP token file is empty or contains whitespace"
 
 grep -Fxq 'AI_HQ_REPOSITORY_MIRROR_ROOT=/srv/ai-hq/repository-mirrors' "$ENV_FILE" || fail "trusted repository mirror root is missing"
 grep -Fxq 'AI_HQ_REPOSITORY_SANDBOX_ROOT=/srv/ai-hq/repository-sandboxes' "$ENV_FILE" || fail "repository sandbox root is missing"
