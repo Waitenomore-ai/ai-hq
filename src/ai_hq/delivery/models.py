@@ -81,6 +81,26 @@ class Delivery(Base):
         unique=True,
     )
 
+    published_branch: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    published_commit: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
+
+    published_tree: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
+
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

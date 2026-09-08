@@ -37,10 +37,8 @@ class Settings(BaseSettings):
     repository_sandbox_root: str | None = None
     ai_hq_repository_source: str | None = None
     dripvid_repository_source: str | None = None
+    github_publish_token_file: str | None = None
 
-    # DripVid automatic-recovery policy. Recovery is deliberately disabled and
-    # observe-only by default. These values are operator configuration and are
-    # never accepted from a mission/model payload.
     recovery_enabled: bool = False
     recovery_observe_only: bool = True
     recovery_observation_seconds: int = Field(default=30, ge=10, le=300)
@@ -51,17 +49,11 @@ class Settings(BaseSettings):
     recovery_verify_seconds: int = Field(default=60, ge=10, le=300)
     recovery_dripvid_ready_url: str = "http://127.0.0.1:3000/health/ready"
 
-    # Provider-independent SysAdmin chat model boundary.
-    # The configured endpoint must expose an OpenAI-compatible
-    # /chat/completions API. API keys remain environment-only.
     chat_model_base_url: str | None = None
     chat_model_name: str | None = None
     chat_model_api_key: str | None = None
     chat_model_timeout_seconds: float = 15.0
 
-    # Free-first conversational AI providers.
-    # Provider priority is enforced by build_chat_model_client:
-    # local -> Groq -> OpenRouter free -> Hugging Face.
     free_ai_local_base_url: str | None = None
     free_ai_local_model: str | None = None
     free_ai_local_api_key: str | None = None
@@ -84,9 +76,7 @@ class Settings(BaseSettings):
     def repository_mirror_root_path(self) -> Path | None:
         if self.repository_mirror_root is None:
             return None
-        return Path(
-            self.repository_mirror_root
-        ).expanduser().resolve()
+        return Path(self.repository_mirror_root).expanduser().resolve()
 
     @property
     def repository_sandbox_root_path(self) -> Path | None:
@@ -100,14 +90,17 @@ class Settings(BaseSettings):
             return None
         return Path(self.ai_hq_repository_source).expanduser().resolve()
 
-
     @property
     def dripvid_repository_source_path(self) -> Path | None:
         if self.dripvid_repository_source is None:
             return None
-        return Path(
-            self.dripvid_repository_source
-        ).expanduser().resolve()
+        return Path(self.dripvid_repository_source).expanduser().resolve()
+
+    @property
+    def github_publish_token_file_path(self) -> Path | None:
+        if self.github_publish_token_file is None:
+            return None
+        return Path(self.github_publish_token_file).expanduser()
 
     @model_validator(mode="after")
     def validate_repository_sandbox_paths(self) -> "Settings":
@@ -116,14 +109,8 @@ class Settings(BaseSettings):
             return self
 
         sources = (
-            (
-                "AI HQ",
-                self.ai_hq_repository_source_path,
-            ),
-            (
-                "DripVid",
-                self.dripvid_repository_source_path,
-            ),
+            ("AI HQ", self.ai_hq_repository_source_path),
+            ("DripVid", self.dripvid_repository_source_path),
         )
 
         for repository_name, source in sources:
@@ -143,23 +130,13 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def validate_production_repository_sources(
-        self,
-    ) -> "Settings":
+    def validate_production_repository_sources(self) -> "Settings":
         validate_production_repository_paths(
             is_production=self.is_production,
-            mirror_root=(
-                self.repository_mirror_root_path
-            ),
-            sandbox_root=(
-                self.repository_sandbox_root_path
-            ),
-            ai_hq_source=(
-                self.ai_hq_repository_source_path
-            ),
-            dripvid_source=(
-                self.dripvid_repository_source_path
-            ),
+            mirror_root=self.repository_mirror_root_path,
+            sandbox_root=self.repository_sandbox_root_path,
+            ai_hq_source=self.ai_hq_repository_source_path,
+            dripvid_source=self.dripvid_repository_source_path,
         )
         return self
 

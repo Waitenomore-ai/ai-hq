@@ -150,6 +150,7 @@ def build_code_change_queue_runner(
         model_client=build_chat_model_client(
             settings
         ),
+        enable_publishing=True,
     )
 
     if service is None:

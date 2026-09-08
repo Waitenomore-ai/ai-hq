@@ -6,6 +6,7 @@ from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
     FileChange,
     FileOperation,
+    NO_GIT_BASE_COMMIT,
     RepositoryWorkspace,
     RepositoryWorkspaceService,
 )
@@ -48,6 +49,7 @@ def test_candidate_snapshot_identity_payload_is_machine_observed():
         "mission_id": "mission-1",
         "repository": "Waitenomore-ai/ai-hq",
         "base_ref": "abc123",
+        "base_commit": NO_GIT_BASE_COMMIT,
         "workspace_id": "workspace-1",
         "changed_files": ["src/a.py", "tests/test_a.py"],
         "diff_digest": "sha256:" + ("a" * 64),
@@ -72,6 +74,17 @@ def test_candidate_snapshot_rejects_invalid_digests_and_file_types():
             repository="Waitenomore-ai/ai-hq",
             base_ref="abc123",
             changed_files=("",),
+            diff_digest="sha256:" + ("a" * 64),
+            content_digest="sha256:" + ("b" * 64),
+        )
+
+    with pytest.raises(ValueError, match="base_commit"):
+        CandidateSnapshot(
+            workspace_id="workspace-1",
+            repository="Waitenomore-ai/ai-hq",
+            base_ref="abc123",
+            base_commit="not-a-git-commit",
+            changed_files=("src/a.py",),
             diff_digest="sha256:" + ("a" * 64),
             content_digest="sha256:" + ("b" * 64),
         )

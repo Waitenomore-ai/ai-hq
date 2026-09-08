@@ -4,6 +4,7 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from ai_hq.delivery.repository_workspace import (
     CandidateSnapshot,
     FileChange,
     FileOperation,
+    NO_GIT_BASE_COMMIT,
     RepositoryWorkspace,
     TestEvidence,
 )
@@ -27,6 +29,7 @@ _CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 _MAX_EVIDENCE_SUMMARY = 4000
 _MAX_OUTPUT_PER_STREAM = 1800
 _MAX_CANDIDATE_REVIEW_DIFF = 24_000
+_GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass
@@ -34,6 +37,7 @@ class _WorkspaceState:
     path: Path
     profile: RepositoryProfile
     base_manifest: dict[str, str]
+    base_commit: str
     snapshot_fingerprint: str | None = None
     candidate_review_diff: str | None = None
 
@@ -60,6 +64,10 @@ class IsolatedRepositorySandbox:
         if not isinstance(mission_id, str) or not mission_id.strip():
             raise ValueError("mission_id is required")
 
+        base_commit = self._resolve_base_commit(
+            self._profile.source_path,
+            self._profile.base_ref,
+        )
         workspace_id = str(uuid4())
         workspace_path = self._sandbox_root / workspace_id
         ignore = None
@@ -79,16 +87,11 @@ class IsolatedRepositorySandbox:
         for relative, dependency in (
             self._profile.shared_dependency_links
         ):
-            link = (
-                workspace_path
-                / PurePosixPath(relative)
-            )
-
+            link = workspace_path / PurePosixPath(relative)
             link.parent.mkdir(
                 parents=True,
                 exist_ok=True,
             )
-
             link.symlink_to(
                 dependency,
                 target_is_directory=True,
@@ -99,12 +102,14 @@ class IsolatedRepositorySandbox:
             path=workspace_path,
             profile=self._profile,
             base_manifest=base_manifest,
+            base_commit=base_commit,
         )
         return RepositoryWorkspace(
             mission_id=mission_id,
             repository=self._profile.key,
             base_ref=self._profile.base_ref,
             workspace_id=workspace_id,
+            base_commit=base_commit,
         )
 
     def apply_changes(
@@ -118,76 +123,39 @@ class IsolatedRepositorySandbox:
             raise TypeError("changes must be a tuple")
 
         before: dict[str, str | None] = {}
-
         for change in changes:
             if not isinstance(change, FileChange):
-                raise TypeError(
-                    "changes must contain FileChange values"
-                )
-
-            target = self._safe_target(
-                state.path,
-                change.path,
-            )
-
+                raise TypeError("changes must contain FileChange values")
+            target = self._safe_target(state.path, change.path)
             if change.path not in before:
-                before[change.path] = (
-                    self._review_text(target)
-                )
+                before[change.path] = self._review_text(target)
 
         for change in changes:
-            target = self._safe_target(
-                state.path,
-                change.path,
-            )
-
+            target = self._safe_target(state.path, change.path)
             if change.operation is FileOperation.WRITE:
-                target.parent.mkdir(
-                    parents=True,
-                    exist_ok=True,
-                )
-                target.write_text(
-                    change.content or "",
-                    encoding="utf-8",
-                )
-
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(change.content or "", encoding="utf-8")
             elif change.operation is FileOperation.DELETE:
                 if target.exists():
-                    if (
-                        not target.is_file()
-                        or target.is_symlink()
-                    ):
+                    if not target.is_file() or target.is_symlink():
                         raise ValueError(
-                            "delete target must be a "
-                            "regular workspace file"
+                            "delete target must be a regular workspace file"
                         )
                     target.unlink()
-
             else:
-                raise ValueError(
-                    "unsupported repository file operation"
-                )
+                raise ValueError("unsupported repository file operation")
 
         after = {
             relative: self._review_text(
-                self._safe_target(
-                    state.path,
-                    relative,
-                )
+                self._safe_target(state.path, relative)
             )
             for relative in before
         }
-
-        state.candidate_review_diff = (
-            self._build_review_diff(
-                before=before,
-                after=after,
-            )
+        state.candidate_review_diff = self._build_review_diff(
+            before=before,
+            after=after,
         )
-
-        return self.snapshot(
-            workspace=workspace
-        )
+        return self.snapshot(workspace=workspace)
 
     def snapshot(
         self,
@@ -220,6 +188,7 @@ class IsolatedRepositorySandbox:
             changed_files=changed_files,
             diff_digest=self._canonical_digest(diff_material),
             content_digest=content_digest,
+            base_commit=state.base_commit,
         )
 
     def review_diff(
@@ -228,15 +197,11 @@ class IsolatedRepositorySandbox:
         workspace: RepositoryWorkspace,
     ) -> str:
         state = self._state_for(workspace)
-
         self._require_current_snapshot(state)
-
         if state.candidate_review_diff is None:
             raise RuntimeError(
-                "candidate review diff is required "
-                "before QA"
+                "candidate review diff is required before QA"
             )
-
         return state.candidate_review_diff
 
     def run_tests(
@@ -308,29 +273,18 @@ class IsolatedRepositorySandbox:
             raise RuntimeError("repository workspace snapshot is stale")
 
     @staticmethod
-    def _review_text(
-        path: Path,
-    ) -> str | None:
+    def _review_text(path: Path) -> str | None:
         if not path.exists():
             return None
-
-        if (
-            not path.is_file()
-            or path.is_symlink()
-        ):
+        if not path.is_file() or path.is_symlink():
             raise ValueError(
-                "candidate review diff requires "
-                "regular files"
+                "candidate review diff requires regular files"
             )
-
         try:
-            return path.read_text(
-                encoding="utf-8"
-            )
+            return path.read_text(encoding="utf-8")
         except UnicodeDecodeError as exc:
             raise ValueError(
-                "candidate review diff requires "
-                "UTF-8 text files"
+                "candidate review diff requires UTF-8 text files"
             ) from exc
 
     @staticmethod
@@ -340,42 +294,15 @@ class IsolatedRepositorySandbox:
         after: dict[str, str | None],
     ) -> str:
         sections: list[str] = []
-
         for relative in sorted(before):
             old = before[relative]
             new = after[relative]
-
             if old == new:
                 continue
-
-            old_lines = (
-                []
-                if old is None
-                else old.splitlines(
-                    keepends=True
-                )
-            )
-
-            new_lines = (
-                []
-                if new is None
-                else new.splitlines(
-                    keepends=True
-                )
-            )
-
-            fromfile = (
-                "/dev/null"
-                if old is None
-                else f"a/{relative}"
-            )
-
-            tofile = (
-                "/dev/null"
-                if new is None
-                else f"b/{relative}"
-            )
-
+            old_lines = [] if old is None else old.splitlines(keepends=True)
+            new_lines = [] if new is None else new.splitlines(keepends=True)
+            fromfile = "/dev/null" if old is None else f"a/{relative}"
+            tofile = "/dev/null" if new is None else f"b/{relative}"
             section = "".join(
                 difflib.unified_diff(
                     old_lines,
@@ -385,22 +312,13 @@ class IsolatedRepositorySandbox:
                     lineterm="\n",
                 )
             )
-
             sections.append(section)
 
-        review_diff = "".join(
-            sections
-        )
-
-        if (
-            len(review_diff)
-            > _MAX_CANDIDATE_REVIEW_DIFF
-        ):
+        review_diff = "".join(sections)
+        if len(review_diff) > _MAX_CANDIDATE_REVIEW_DIFF:
             raise ValueError(
-                "candidate review diff exceeds "
-                "maximum safe review size"
+                "candidate review diff exceeds maximum safe review size"
             )
-
         return review_diff
 
     @staticmethod
@@ -420,6 +338,70 @@ class IsolatedRepositorySandbox:
             check=False,
         )
 
+    @staticmethod
+    def _git_read(source: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(source), *args],
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("repository base checkout could not be verified") from exc
+
+    @classmethod
+    def _resolve_base_commit(cls, source: Path, base_ref: str) -> str:
+        git_marker = source / ".git"
+        if not git_marker.exists():
+            return NO_GIT_BASE_COMMIT
+
+        base_result = cls._git_read(
+            source,
+            "rev-parse",
+            "--verify",
+            f"{base_ref}^{{commit}}",
+        )
+        base_commit = (base_result.stdout or "").strip()
+        if (
+            base_result.returncode != 0
+            or not _GIT_COMMIT_RE.fullmatch(base_commit)
+        ):
+            raise RuntimeError("repository base commit could not be resolved")
+
+        head_result = cls._git_read(
+            source,
+            "rev-parse",
+            "--verify",
+            "HEAD^{commit}",
+        )
+        head_commit = (head_result.stdout or "").strip()
+        if (
+            head_result.returncode != 0
+            or not _GIT_COMMIT_RE.fullmatch(head_commit)
+            or head_commit != base_commit
+        ):
+            raise RuntimeError(
+                "repository source HEAD must match the exact base commit"
+            )
+
+        status_result = cls._git_read(
+            source,
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        )
+        if status_result.returncode != 0:
+            raise RuntimeError("repository source checkout could not be verified")
+        if (status_result.stdout or "").strip():
+            raise RuntimeError(
+                "repository source checkout must be clean before candidate preparation"
+            )
+
+        return base_commit
+
     def _validate_root_isolation(self) -> None:
         source = self._profile.source_path.resolve()
         sandbox = self._sandbox_root
@@ -438,6 +420,8 @@ class IsolatedRepositorySandbox:
             raise ValueError("workspace repository identity mismatch")
         if workspace.base_ref != state.profile.base_ref:
             raise ValueError("workspace base reference mismatch")
+        if workspace.base_commit != state.base_commit:
+            raise ValueError("workspace base commit mismatch")
         return state
 
     def _safe_target(self, workspace_root: Path, raw_path: str) -> Path:
@@ -481,7 +465,9 @@ class IsolatedRepositorySandbox:
                     manifest[relative] = f"symlink:{os.readlink(path)}"
                     continue
                 if path.is_file():
-                    manifest[relative] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+                    manifest[relative] = "sha256:" + hashlib.sha256(
+                        path.read_bytes()
+                    ).hexdigest()
 
             for name in dirnames:
                 path = directory_path / name

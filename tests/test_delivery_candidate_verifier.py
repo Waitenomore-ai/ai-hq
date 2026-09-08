@@ -19,11 +19,12 @@ def proposal():
     }
 
 
-def snapshot(*, diff_char="a", content_char="b", files=None):
+def snapshot(*, diff_char="a", content_char="b", base_char="d", files=None):
     return CandidateSnapshot(
         workspace_id="workspace-1",
         repository="Waitenomore-ai/ai-hq",
-        base_ref="abc123",
+        base_ref="main",
+        base_commit=base_char * 40,
         changed_files=tuple(files or ("src/real.py", "tests/test_real.py")),
         diff_digest="sha256:" + (diff_char * 64),
         content_digest="sha256:" + (content_char * 64),
@@ -75,7 +76,20 @@ def test_change_ref_changes_when_snapshot_changes():
     )
     second = verify(
         mission_id="mission-3",
-        snap=snapshot(diff_char="d"),
+        snap=snapshot(diff_char="e"),
+    )
+
+    assert first.change_ref != second.change_ref
+
+
+def test_change_ref_changes_when_exact_base_commit_changes():
+    first = verify(
+        mission_id="mission-base",
+        snap=snapshot(base_char="d"),
+    )
+    second = verify(
+        mission_id="mission-base",
+        snap=snapshot(base_char="e"),
     )
 
     assert first.change_ref != second.change_ref
@@ -109,7 +123,8 @@ def test_verifier_records_machine_generated_repository_and_test_evidence():
         "change_ref": result.change_ref,
         "workspace_id": "workspace-1",
         "repository": "Waitenomore-ai/ai-hq",
-        "base_ref": "abc123",
+        "base_ref": "main",
+        "base_commit": "d" * 40,
         "diff_digest": "sha256:" + ("a" * 64),
         "content_digest": "sha256:" + ("b" * 64),
         "tests": {
