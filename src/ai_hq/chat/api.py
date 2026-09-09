@@ -169,6 +169,10 @@ class ValidationToolRegistry:
         "system.health.read",
         "service.status.read",
         "service.logs.read",
+        "dripvid.health.read",
+        "dripvid.release.read",
+        "dripvid.config.read",
+        "dripvid.service.status.read",
     })
 
     def resolve(self, tool_name: str) -> str:

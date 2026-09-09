@@ -44,6 +44,10 @@ class FakeRegistry:
             "system.health.read",
             "service.status.read",
             "service.logs.read",
+            "dripvid.health.read",
+            "dripvid.release.read",
+            "dripvid.config.read",
+            "dripvid.service.status.read",
         }
         if capability not in allowed:
             raise KeyError(capability)
@@ -199,6 +203,50 @@ def test_operational_request_creates_read_only_mission_and_plan(
 
     assert all(
         step.tool_arguments == {"target": "ai-hq"}
+        for step in steps
+    )
+
+    assert all(
+        step.status is MissionStepStatus.PENDING
+        for step in steps
+    )
+
+
+def test_dripvid_operational_request_creates_read_only_mission_and_plan(
+    session_factory,
+):
+    chat = ChatService(session_factory)
+    conversation = chat.create_conversation("session-1")
+    model = RecordingModel("THIS MUST NOT RUN YET")
+    controller = build_controller(session_factory, model=model)
+
+    result = controller.submit(
+        owner_session_id="session-1",
+        conversation_id=conversation.id,
+        text="Check DripVid health",
+    )
+
+    assert result.state == "pending"
+    assert result.mission_id
+    assert result.message.mission_id == result.mission_id
+    assert model.calls == []
+
+    missions = MissionService(session_factory)
+    mission = missions.get_mission(result.mission_id)
+
+    assert mission.owner_agent == "sysadmin"
+    assert mission.source == "sysadmin_chat"
+    assert mission.risk is MissionRisk.GREEN
+    assert mission.status is MissionStatus.QUEUED
+
+    steps = missions.list_plan_steps(mission.id)
+
+    assert set(step.tool_name for step in steps) == {
+        "dripvid.health.read"
+    }
+
+    assert all(
+        step.tool_arguments == {"target": "dripvid"}
         for step in steps
     )
 

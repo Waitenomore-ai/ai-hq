@@ -176,6 +176,10 @@ def test_chat_api_validation_registry_is_exactly_read_only():
         "system.health.read",
         "service.status.read",
         "service.logs.read",
+        "dripvid.health.read",
+        "dripvid.release.read",
+        "dripvid.config.read",
+        "dripvid.service.status.read",
     ):
         assert tool in source
 
