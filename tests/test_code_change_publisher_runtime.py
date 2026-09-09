@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,10 @@ def test_publisher_token_file_is_optional_non_secret_configuration():
     assert "secret-token-contents" not in repr(configured)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Unix permission bits not enforced on Windows",
+)
 def test_token_loader_accepts_only_restrictive_regular_file(tmp_path):
     token = tmp_path / "publisher-token"
     token.write_text("github-test-token\n")
@@ -42,6 +47,10 @@ def test_token_loader_accepts_only_restrictive_regular_file(tmp_path):
         load_github_publish_token(token)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="symlink creation requires elevated privileges on Windows",
+)
 def test_token_loader_rejects_symlink_empty_or_missing_file(tmp_path):
     missing = tmp_path / "missing"
     with pytest.raises(ValueError, match="regular|file"):

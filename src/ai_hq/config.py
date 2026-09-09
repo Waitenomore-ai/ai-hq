@@ -1,9 +1,9 @@
+import os
 from enum import StrEnum
 from functools import lru_cache
 from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlsplit
-
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -155,11 +155,16 @@ class Settings(BaseSettings):
             return self
 
         socket_value = self.dripvid_mcp_socket.strip()
-        if "://" in socket_value or not self.dripvid_mcp_socket_path.is_absolute():
+        if "://" in socket_value:
+            raise ValueError("AI HQ production DripVid MCP socket must be an absolute Unix path")
+
+        # Unix absolute-path semantics do not apply to Windows dev/test hosts;
+        # production deployment target is Linux where this remains enforced.
+        if os.name != "nt" and not self.dripvid_mcp_socket_path.is_absolute():
             raise ValueError("AI HQ production DripVid MCP socket must be an absolute Unix path")
 
         token_path = self.dripvid_mcp_token_file_path
-        if token_path is not None and not token_path.is_absolute():
+        if token_path is not None and token_path.is_absolute() is False and os.name != "nt":
             raise ValueError("AI HQ production DripVid MCP token path must be absolute")
         return self
 

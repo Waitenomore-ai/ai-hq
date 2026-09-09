@@ -1,6 +1,13 @@
+import sys
+
 import pytest
 
 from ai_hq.dripvid_mcp.runtime import load_dripvid_mcp_token
+
+requires_symlink = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="symlink creation requires elevated privileges on Windows",
+)
 
 
 def test_load_dripvid_mcp_token_reads_owner_only_regular_file(tmp_path):
@@ -10,6 +17,7 @@ def test_load_dripvid_mcp_token_reads_owner_only_regular_file(tmp_path):
     assert load_dripvid_mcp_token(token_file) == "abc123"
 
 
+@requires_symlink
 def test_load_dripvid_mcp_token_rejects_symlink(tmp_path):
     real = tmp_path / "real"
     real.write_text("abc123", encoding="utf-8")
@@ -20,6 +28,10 @@ def test_load_dripvid_mcp_token_rejects_symlink(tmp_path):
         load_dripvid_mcp_token(link)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Unix permission bits not enforced on Windows",
+)
 def test_load_dripvid_mcp_token_rejects_broad_permissions(tmp_path):
     token_file = tmp_path / "token"
     token_file.write_text("abc123", encoding="utf-8")

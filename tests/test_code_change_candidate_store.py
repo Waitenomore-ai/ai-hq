@@ -1,12 +1,18 @@
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
 from ai_hq.code_changes.candidate_store import CandidateStore
+
+requires_symlink = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="symlink creation requires elevated privileges on Windows",
+)
 
 
 def manifest(root: Path) -> dict[str, str]:
@@ -49,10 +55,10 @@ def build_candidate(tmp_path: Path):
     workspace_id = str(uuid4())
     workspace = root / "ai-hq" / workspace_id
     (workspace / "src").mkdir(parents=True)
-    (workspace / "src" / "changed.py").write_text("VALUE = 2\n")
-    (workspace / "untouched.txt").write_text("same\n")
+    (workspace / "src" / "changed.py").write_bytes(b"VALUE = 2\n")
+    (workspace / "untouched.txt").write_bytes(b"same\n")
     (workspace / ".git").mkdir()
-    (workspace / ".git" / "ignored").write_text("ignored\n")
+    (workspace / ".git" / "ignored").write_bytes(b"ignored\n")
 
     content_digest = digest(manifest(workspace))
     diff_digest = "sha256:" + "c" * 64
@@ -172,6 +178,7 @@ def test_store_rejects_changed_files_that_do_not_match_change_ref(tmp_path):
         )
 
 
+@requires_symlink
 def test_store_rejects_workspace_symlink(tmp_path):
     root, workspace, change_ref, evidence = build_candidate(tmp_path)
     real = tmp_path / "real-workspace"
@@ -203,6 +210,7 @@ def test_store_rejects_unsafe_or_duplicate_changed_paths(tmp_path):
             load(store, change_ref, evidence, changed_files=paths)
 
 
+@requires_symlink
 def test_store_rejects_symlink_as_changed_file(tmp_path):
     root, workspace, _, evidence = build_candidate(tmp_path)
     outside = tmp_path / "outside.txt"

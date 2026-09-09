@@ -1,6 +1,7 @@
 import json
 import socket
 import stat
+import sys
 import threading
 from pathlib import Path
 
@@ -8,6 +9,11 @@ import pytest
 
 from ai_hq.host_helper.contracts import HelperResponse, HostAllowLists
 from ai_hq.host_helper.server import MAX_REQUEST_BYTES, HostHelperServer, _default_allow_lists
+
+requires_unix_socket = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Unix domain sockets not available on Windows",
+)
 
 
 class FakeExecutor:
@@ -55,6 +61,7 @@ def test_default_allow_lists_match_live_host_topology():
     assert allow_lists.containers == frozenset({"ai-hq-web", "ai-hq-worker"})
 
 
+@requires_unix_socket
 def test_missing_and_invalid_credentials_have_same_failure(
     tmp_path: Path,
     allow_lists: HostAllowLists,
@@ -80,6 +87,7 @@ def test_missing_and_invalid_credentials_have_same_failure(
     assert executor.requests == []
 
 
+@requires_unix_socket
 def test_valid_request_invokes_executor_once(tmp_path: Path, allow_lists: HostAllowLists):
     executor = FakeExecutor()
     server = HostHelperServer(tmp_path / "helper.sock", "correct-secret", allow_lists, executor)
@@ -97,6 +105,7 @@ def test_valid_request_invokes_executor_once(tmp_path: Path, allow_lists: HostAl
     assert len(executor.requests) == 1
 
 
+@requires_unix_socket
 def test_invalid_json_returns_bounded_error(tmp_path: Path, allow_lists: HostAllowLists):
     executor = FakeExecutor()
     server = HostHelperServer(tmp_path / "helper.sock", "secret", allow_lists, executor)
@@ -110,6 +119,7 @@ def test_invalid_json_returns_bounded_error(tmp_path: Path, allow_lists: HostAll
     assert response["error"] == "invalid request"
 
 
+@requires_unix_socket
 def test_oversized_request_is_rejected(tmp_path: Path, allow_lists: HostAllowLists):
     executor = FakeExecutor()
     server = HostHelperServer(tmp_path / "helper.sock", "secret", allow_lists, executor)
@@ -124,6 +134,7 @@ def test_oversized_request_is_rejected(tmp_path: Path, allow_lists: HostAllowLis
     assert executor.requests == []
 
 
+@requires_unix_socket
 def test_socket_mode_is_0660(tmp_path: Path, allow_lists: HostAllowLists):
     server = HostHelperServer(tmp_path / "helper.sock", "secret", allow_lists, FakeExecutor())
     server.bind()
@@ -134,6 +145,7 @@ def test_socket_mode_is_0660(tmp_path: Path, allow_lists: HostAllowLists):
     assert mode == 0o660
 
 
+@requires_unix_socket
 def test_bind_removes_stale_socket_but_refuses_non_socket(
     tmp_path: Path,
     allow_lists: HostAllowLists,

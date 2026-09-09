@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,10 @@ def test_dripvid_mcp_defaults_use_fixed_unix_socket():
     assert settings.dripvid_mcp_timeout_seconds == 5.0
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Unix absolute socket path semantics differ on Windows",
+)
 def test_production_rejects_relative_mcp_socket_path():
     with pytest.raises(ValidationError, match="DripVid MCP socket"):
         base_settings(
@@ -41,6 +46,10 @@ def test_production_rejects_network_url_in_socket_setting():
         )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Unix absolute token path semantics differ on Windows",
+)
 def test_production_rejects_relative_mcp_token_path():
     with pytest.raises(ValidationError, match="DripVid MCP token"):
         base_settings(

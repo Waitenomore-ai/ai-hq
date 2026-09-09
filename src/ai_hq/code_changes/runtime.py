@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import stat
+import sys
 from pathlib import Path
 
 import httpx
@@ -39,10 +40,11 @@ def load_github_publish_token(path: Path) -> str:
 
     if token_path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
         raise ValueError("GitHub publisher token must be a regular non-symlink file")
-    if metadata.st_mode & 0o077:
-        raise ValueError("GitHub publisher token file permissions are too broad")
-    if not metadata.st_mode & stat.S_IRUSR:
-        raise ValueError("GitHub publisher token file must be owner-readable")
+    if sys.platform != "win32":
+        if metadata.st_mode & 0o077:
+            raise ValueError("GitHub publisher token file permissions are too broad")
+        if not metadata.st_mode & stat.S_IRUSR:
+            raise ValueError("GitHub publisher token file must be owner-readable")
     if metadata.st_size > _MAX_GITHUB_TOKEN_BYTES:
         raise ValueError("GitHub publisher token file is too large")
 

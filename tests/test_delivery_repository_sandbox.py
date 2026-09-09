@@ -1,5 +1,6 @@
 import inspect
 import subprocess
+import sys
 from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired
 
@@ -11,6 +12,11 @@ from ai_hq.delivery.repository_profiles import (
 )
 from ai_hq.delivery.repository_sandbox import IsolatedRepositorySandbox
 from ai_hq.delivery.repository_workspace import FileChange, FileOperation
+
+requires_symlink = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="symlink creation requires elevated privileges on Windows",
+)
 
 
 def build_sandbox(tmp_path, *, command_runner=None, base_ref="main"):
@@ -168,6 +174,7 @@ def test_apply_changes_rejects_paths_that_escape_workspace(tmp_path, path):
         )
 
 
+@requires_symlink
 def test_apply_changes_rejects_symlink_escape(tmp_path):
     sandbox, source, _ = build_sandbox(tmp_path)
     outside = tmp_path / "outside"

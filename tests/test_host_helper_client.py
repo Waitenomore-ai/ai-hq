@@ -1,5 +1,6 @@
 import json
 import socket
+import sys
 import threading
 from pathlib import Path
 
@@ -7,6 +8,11 @@ import pytest
 
 from ai_hq.host_helper.client import MAX_RESPONSE_BYTES, HostHelperClient, HostHelperError
 from ai_hq.host_helper.contracts import HelperRequest, HelperResponse, HostCapability
+
+requires_unix_socket = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Unix domain sockets not available on Windows",
+)
 
 
 def run_server(socket_path: Path, response: bytes, seen: list[dict]) -> threading.Thread:
@@ -35,6 +41,7 @@ def run_server(socket_path: Path, response: bytes, seen: list[dict]) -> threadin
     return thread
 
 
+@requires_unix_socket
 def test_client_sends_authenticated_request_and_returns_response(tmp_path: Path):
     socket_path = tmp_path / "helper.sock"
     seen: list[dict] = []
@@ -54,6 +61,7 @@ def test_client_sends_authenticated_request_and_returns_response(tmp_path: Path)
     assert seen[0]["capability"] == "host.health"
 
 
+@requires_unix_socket
 def test_client_normalizes_connect_failure_without_leaking_credential(tmp_path: Path):
     credential = "never-show-this-secret"
     client = HostHelperClient(str(tmp_path / "missing.sock"), credential, timeout_seconds=0.1)
@@ -64,6 +72,7 @@ def test_client_normalizes_connect_failure_without_leaking_credential(tmp_path: 
     assert credential not in str(exc_info.value)
 
 
+@requires_unix_socket
 def test_client_rejects_malformed_response(tmp_path: Path):
     socket_path = tmp_path / "helper.sock"
     thread = run_server(socket_path, b"not-json\n", [])
@@ -74,6 +83,7 @@ def test_client_rejects_malformed_response(tmp_path: Path):
     thread.join(timeout=2)
 
 
+@requires_unix_socket
 def test_client_rejects_oversized_response(tmp_path: Path):
     socket_path = tmp_path / "helper.sock"
     thread = run_server(socket_path, b"x" * (MAX_RESPONSE_BYTES + 1), [])
@@ -84,6 +94,7 @@ def test_client_rejects_oversized_response(tmp_path: Path):
     thread.join(timeout=2)
 
 
+@requires_unix_socket
 def test_client_rejects_capability_or_target_echo_mismatch(tmp_path: Path):
     socket_path = tmp_path / "helper.sock"
     thread = run_server(

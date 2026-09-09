@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import sys
 from pathlib import Path
 
 import pytest
@@ -185,6 +186,10 @@ def test_worker_failure_message_is_sanitized(
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="symlink creation requires elevated privileges on Windows",
+)
 def test_dripvid_reuses_shared_node_modules(
     tmp_path: Path,
 ):
