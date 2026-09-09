@@ -34,10 +34,25 @@ def test_allowlisted_dripvid_service_status_is_explicit():
 
 def test_unknown_service_name_is_not_misread_as_dripvid_service():
     intent = plan_sysadmin_intent("is ssh running on dripvid?")
-    assert intent.kind != "operational" or all(
-        step["tool_arguments"].get("service") != "dripvid"
-        for step in intent.steps
-    )
+    assert intent.kind == "refused"
+    assert "ssh" in (intent.refusal_reason or "")
+    assert "not allowlisted" in (intent.refusal_reason or "").lower()
+
+
+def test_allowlisted_service_phrasing_stays_operational():
+    intent = plan_sysadmin_intent("is cloudflared active on dripvid?")
+    assert intent.kind == "operational"
+    assert intent.steps[0]["tool_name"] == "dripvid.service.status.read"
+    assert intent.steps[0]["tool_arguments"] == {
+        "target": "dripvid",
+        "service": "cloudflared",
+    }
+
+
+def test_unallowlisted_service_up_refused():
+    intent = plan_sysadmin_intent("is radarr up on dripvid?")
+    assert intent.kind == "refused"
+    assert "radarr" in (intent.refusal_reason or "")
 
 
 def test_dripvid_logs_are_not_silently_mapped_to_ai_hq_logs():

@@ -165,6 +165,21 @@ def _explicit_dripvid_service(normalized: str) -> str | None:
     return None
 
 
+_REFERENCED_SERVICE_PATTERNS = (
+    r"\b(?:is|are)\s+([a-z0-9_-]+)\s+(?:running|up|active)\s+on\s+dripvid\b",
+    r"\b([a-z0-9_-]+)\s+(?:service\s+)?(?:status|state)\s+on\s+dripvid\b",
+    r"\bstatus\s+of\s+([a-z0-9_-]+)\s+on\s+dripvid\b",
+)
+
+
+def _referenced_service(normalized: str) -> str | None:
+    for pattern in _REFERENCED_SERVICE_PATTERNS:
+        match = re.search(pattern, normalized)
+        if match:
+            return match.group(1)
+    return None
+
+
 def _plan_dripvid_read(normalized: str) -> ChatIntent | None:
     mentions_dripvid = _contains_any(normalized, DRIPVID_TARGET_WORDS)
     named_service = _explicit_dripvid_service(normalized)
@@ -221,6 +236,31 @@ def _plan_dripvid_read(normalized: str) -> ChatIntent | None:
                 ),
             ),
         )
+
+    referenced_status_phrasing = service_status_words + (" up ", " active ")
+    if mentions_dripvid and _contains_any(normalized, referenced_status_phrasing):
+        referenced = _referenced_service(normalized)
+        if referenced is not None:
+            if referenced == "dripvid" or referenced in DRIPVID_SERVICES:
+                return ChatIntent(
+                    kind="operational",
+                    steps=(
+                        _step(
+                            "dripvid.service.status.read",
+                            f"Read {referenced} service status through DripVid MCP",
+                            target=DRIPVID_TARGET,
+                            service=referenced,
+                        ),
+                    ),
+                )
+            return ChatIntent(
+                kind="refused",
+                refusal_reason=(
+                    "DripVid service status reads are limited to the read-only "
+                    "allowlist (dripvid, jellyfin, cloudflared, "
+                    f"dripvid-requests). {referenced} is not allowlisted."
+                ),
+            )
 
     if mentions_dripvid and _contains_any(
         normalized,
