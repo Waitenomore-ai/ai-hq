@@ -7,6 +7,7 @@ from typing import Any
 
 from ai_hq.chat.model_client import ChatModelClient
 from ai_hq.delivery.models import QAResult
+from ai_hq.delivery.repository_profiles import TRUSTED_REPOSITORY_KEYS
 
 
 _DEVELOPER_SYSTEM_PROMPT = """
@@ -227,7 +228,7 @@ class ModelBackedDeveloperAgent:
             instruction = supplied.get("instruction")
             files = supplied.get("files")
 
-            if repository not in {"ai-hq", "dripvid"}:
+            if repository not in TRUSTED_REPOSITORY_KEYS:
                 raise ValueError("Developer context requires trusted repository")
 
             if not isinstance(instruction, str) or not instruction.strip():

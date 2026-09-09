@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
+from ai_hq.delivery.repository_profiles import TRUSTED_REPOSITORY_KEYS
+
 
 _ALLOWED_SUFFIXES = frozenset(
     {
@@ -164,7 +166,7 @@ class RepositoryContextProvider:
         max_chars_per_file: int = 12000,
         max_total_chars: int = 48000,
     ) -> None:
-        if repository not in {"ai-hq", "dripvid"}:
+        if repository not in TRUSTED_REPOSITORY_KEYS:
             raise ValueError("unknown trusted repository")
 
         source = Path(source_path).expanduser().resolve()

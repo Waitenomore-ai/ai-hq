@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
+from ai_hq.delivery.repository_profiles import TRUSTED_REPOSITORY_KEYS
 from ai_hq.operations.adapters import OperationalTransport
 from ai_hq.operations.targets import OperationalTarget, OperationalTargetRegistry
 
@@ -91,7 +92,7 @@ class OperationalCandidateRollbacker:
         transport: OperationalTransport,
         repository: str,
     ) -> None:
-        if not isinstance(repository, str) or repository not in {"ai-hq", "dripvid"}:
+        if not isinstance(repository, str) or repository not in TRUSTED_REPOSITORY_KEYS:
             raise ValueError("unsupported rollback target")
         try:
             target = targets.require(repository)

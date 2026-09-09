@@ -479,6 +479,14 @@ class ChatController:
             )
         )
 
+        file_count = len(result.changed_files)
+        changed_label = (
+            f"{file_count} file"
+            + ("s" if file_count != 1 else "")
+            if result.changed_files
+            else "no files"
+        )
+
         changed = "\n".join(
             f"- `{path}`"
             for path in result.changed_files
@@ -496,6 +504,9 @@ class ChatController:
             else "NORMAL REVIEW"
         )
 
+        qa_label = self._qa_result_label(result)
+        action_prompt = self._approval_action_prompt(result)
+
         message = self.chat_service.add_message(
             conversation_id=conversation_id,
             owner_session_id=owner_session_id,
@@ -504,12 +515,14 @@ class ChatController:
                 f"## Code Candidate: "
                 f"{result.repository}\n\n"
                 f"{result.summary}\n\n"
-                f"**Changed files**\n"
+                f"**Changed files:** {changed_label}\n\n"
                 f"{changed}\n\n"
                 f"**Candidate:** "
                 f"`{result.change_ref}`\n\n"
-                f"**Review:** {risk}\n\n"
+                f"**Review:** {risk} | "
+                f"**QA:** {qa_label} | "
                 f"**Status:** {status}\n\n"
+                f"{action_prompt}"
                 f"{self._code_change_outcome(result)}"
             ),
             mission_id=mission_id,
@@ -523,6 +536,27 @@ class ChatController:
             ),
             message=message,
             mission_id=mission_id,
+        )
+
+    @staticmethod
+    def _qa_result_label(result: Any) -> str:
+        qa = getattr(result, "qa_result", None)
+        if qa is None:
+            return "pending"
+        qa_str = str(qa).lower()
+        if "passed" in qa_str or qa_str == "QAResult.PASSED".lower():
+            return "**PASSED**"
+        if "failed" in qa_str:
+            return "**FAILED**"
+        return qa_str
+
+    @staticmethod
+    def _approval_action_prompt(result: Any) -> str:
+        if not result.ready_for_approval:
+            return ""
+        return (
+            "> **Reply with** `approve` **to deploy this "
+            "candidate to production.**\n\n"
         )
 
     @staticmethod

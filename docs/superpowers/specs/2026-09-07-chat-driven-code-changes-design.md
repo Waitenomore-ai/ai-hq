@@ -340,8 +340,8 @@ Required coverage includes:
 ### Phase D - Recovery and polish
 
 - chat-driven rollback of known releases;
-- improved code-change summaries/previews;
-- additional safe repository profiles and project-specific verification as needed.
+- improved code-change summaries/previews (file count, QA badge, approval prompt in chat);
+- additional safe repository profiles and project-specific verification as needed (trusted repository keys centralized in `repository_profiles.TRUSTED_REPOSITORY_KEYS`; each `RepositoryProfile` carries a description).
 
 ## Non-goals
 

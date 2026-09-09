@@ -9,6 +9,7 @@ from typing import Protocol
 import httpx
 
 from ai_hq.code_changes.candidate_store import CandidateStore, PersistedCandidate
+from ai_hq.delivery.repository_profiles import TRUSTED_REPOSITORY_KEYS
 
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -30,7 +31,7 @@ class RepositoryPublishTarget:
         base_branch = _required(self.base_branch, "base_branch")
         branch_prefix = _required(self.branch_prefix, "branch_prefix")
 
-        if key not in {"ai-hq", "dripvid"}:
+        if key not in TRUSTED_REPOSITORY_KEYS:
             raise ValueError("unsupported publish target key")
         if not _REPOSITORY_RE.fullmatch(repository):
             raise ValueError("repository_full_name must be owner/name")
@@ -114,7 +115,7 @@ class PublishedCandidate:
     def __post_init__(self) -> None:
         repository = _required(self.repository, "repository")
         branch_name = _required(self.branch_name, "branch_name")
-        if repository not in {"ai-hq", "dripvid"}:
+        if repository not in TRUSTED_REPOSITORY_KEYS:
             raise ValueError("unknown published repository")
         if not isinstance(self.change_ref, str) or not _SHA256_RE.fullmatch(
             self.change_ref

@@ -5,12 +5,21 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 
+TRUSTED_REPOSITORY_KEYS = frozenset(
+    {
+        "ai-hq",
+        "dripvid",
+    }
+)
+
+
 @dataclass(frozen=True)
 class RepositoryProfile:
     key: str
     source_path: Path
     base_ref: str
     test_commands: tuple[tuple[str, ...], ...]
+    description: str = ""
     test_timeout_seconds: float = 90.0
     copy_excludes: tuple[str, ...] = ()
     shared_dependency_links: tuple[
@@ -22,6 +31,10 @@ class RepositoryProfile:
         key = self.key.strip() if isinstance(self.key, str) else ""
         if not key:
             raise ValueError("repository key is required")
+        if key not in TRUSTED_REPOSITORY_KEYS:
+            raise ValueError(
+                "repository key must be a registered trusted repository"
+            )
 
         source = Path(self.source_path).expanduser().resolve()
         if not source.is_dir():
@@ -43,6 +56,9 @@ class RepositoryProfile:
             raise TypeError("test_timeout_seconds must be numeric")
         if self.test_timeout_seconds <= 0:
             raise ValueError("test_timeout_seconds must be positive")
+
+        if not isinstance(self.description, str):
+            raise TypeError("description must be a string")
 
         normalized_links: list[
             tuple[str, Path]
@@ -143,6 +159,10 @@ def build_ai_hq_repository_profile(
         key="ai-hq",
         source_path=source_path,
         base_ref=base_ref,
+        description=(
+            "AI HQ — the Python FastAPI service that powers "
+            "this chat, governable repos, and tool gateway."
+        ),
         test_commands=(
             (sys.executable, "-m", "ruff", "check", "src", "tests"),
             (sys.executable, "-m", "pytest", "-q"),
@@ -183,6 +203,10 @@ def build_dripvid_repository_profile(
         key="dripvid",
         source_path=source,
         base_ref=base_ref,
+        description=(
+            "DripVid — the Vue web app for video editing "
+            "and management (dripvid.uk)."
+        ),
         test_commands=(
             ("npm", "run", "check"),
             ("npm", "test"),

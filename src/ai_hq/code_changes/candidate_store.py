@@ -10,7 +10,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import UUID
 
-_ALLOWED_REPOSITORIES = frozenset({"ai-hq", "dripvid"})
+from ai_hq.delivery.repository_profiles import TRUSTED_REPOSITORY_KEYS
+
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -59,7 +60,7 @@ class CandidateStore:
             raise ValueError("candidate change_ref mismatch")
 
         repository = self._required(evidence.get("repository"), "repository")
-        if repository not in _ALLOWED_REPOSITORIES:
+        if repository not in TRUSTED_REPOSITORY_KEYS:
             raise ValueError("unknown candidate repository")
 
         base_ref = self._required(evidence.get("base_ref"), "base_ref")

@@ -30,8 +30,10 @@ class FakeCodeChangeResult:
     high_risk: bool = False
     published: bool = False
     deployed: bool = False
+    rolled_back: bool = False
     deployment_release_id: str | None = None
     deployment_prior_release_id: str | None = None
+    rollback_release_id: str | None = None
 
     def __post_init__(self):
         if self.developer_evidence is None:
@@ -342,3 +344,135 @@ def test_completed_code_change_reply_keeps_bound_text_when_nothing_deployed():
         "No code was published or deployed."
         in result.message.content
     )
+
+
+def test_completed_code_change_reply_reports_file_count():
+    controller, chat, _changes = build_controller()
+
+    class MultiFileResult:
+        repository = "dripvid"
+        summary = "Toolbar reduced"
+        change_ref = "sha256:" + ("a" * 64)
+        changed_files = (
+            "public/css/app.css",
+            "src/components/toolbar.js",
+        )
+        ready_for_approval = True
+        high_risk = False
+        published = False
+        deployed = False
+
+    class MultiFileChanges:
+        def candidate_result(self, **kwargs):
+            return MultiFileResult()
+
+    controller.code_change_service = MultiFileChanges()
+
+    mission_id = "mission-code-1"
+    chat.add_message(
+        conversation_id="conversation-1",
+        owner_session_id="session-1",
+        role="user",
+        content="status",
+        mission_id=mission_id,
+    )
+
+    result = controller._completed_code_change_reply(
+        owner_session_id="session-1",
+        conversation_id="conversation-1",
+        mission_id=mission_id,
+    )
+
+    content = result.message.content
+
+    assert "**Changed files:** 2 files" in content
+    assert "- `public/css/app.css`" in content
+    assert "- `src/components/toolbar.js`" in content
+
+
+def test_completed_code_change_reply_surfaces_qa_badge_and_approval_prompt():
+    controller, chat, _changes = build_controller()
+
+    class QaResult:
+        repository = "dripvid"
+        summary = "Toolbar reduced"
+        change_ref = "sha256:" + ("a" * 64)
+        changed_files = (
+            "public/css/app.css",
+        )
+        qa_result = "PASSED"
+        ready_for_approval = True
+        high_risk = False
+        published = False
+        deployed = False
+
+    class QaChanges:
+        def candidate_result(self, **kwargs):
+            return QaResult()
+
+    controller.code_change_service = QaChanges()
+
+    mission_id = "mission-code-1"
+    chat.add_message(
+        conversation_id="conversation-1",
+        owner_session_id="session-1",
+        role="user",
+        content="status",
+        mission_id=mission_id,
+    )
+
+    result = controller._completed_code_change_reply(
+        owner_session_id="session-1",
+        conversation_id="conversation-1",
+        mission_id=mission_id,
+    )
+
+    content = result.message.content
+
+    assert "**QA:** **PASSED**" in content
+    assert "**Status:** READY FOR APPROVAL" in content
+    assert "> **Reply with** `approve` **to deploy this" in content
+
+
+def test_completed_code_change_reply_not_ready_has_no_approval_prompt():
+    controller, chat, _changes = build_controller()
+
+    class NotReadyResult:
+        repository = "dripvid"
+        summary = "Toolbar reduced"
+        change_ref = "sha256:" + ("a" * 64)
+        changed_files = (
+            "public/css/app.css",
+        )
+        qa_result = None
+        ready_for_approval = False
+        high_risk = True
+        published = False
+        deployed = False
+
+    class NotReadyChanges:
+        def candidate_result(self, **kwargs):
+            return NotReadyResult()
+
+    controller.code_change_service = NotReadyChanges()
+
+    mission_id = "mission-code-1"
+    chat.add_message(
+        conversation_id="conversation-1",
+        owner_session_id="session-1",
+        role="user",
+        content="status",
+        mission_id=mission_id,
+    )
+
+    result = controller._completed_code_change_reply(
+        owner_session_id="session-1",
+        conversation_id="conversation-1",
+        mission_id=mission_id,
+    )
+
+    content = result.message.content
+
+    assert "NOT READY FOR APPROVAL" in content
+    assert "HIGH RISK" in content
+    assert "Reply with `approve`" not in content

@@ -13,6 +13,7 @@ from ai_hq.code_changes.rollbacker import (
 )
 from ai_hq.delivery.agent_runner import DeliveryAgentRunner
 from ai_hq.delivery.models import DeliveryStage, QAResult
+from ai_hq.delivery.repository_profiles import TRUSTED_REPOSITORY_KEYS
 from ai_hq.delivery.service import DeliveryService
 from ai_hq.missions.models import (
     MissionPriority,
@@ -20,14 +21,6 @@ from ai_hq.missions.models import (
     MissionStatus,
 )
 from ai_hq.missions.service import MissionService
-
-
-TRUSTED_REPOSITORIES = frozenset(
-    {
-        "ai-hq",
-        "dripvid",
-    }
-)
 
 
 HIGH_RISK_AI_HQ_PREFIXES = (
@@ -868,7 +861,7 @@ class CodeChangeService:
 
         repository = repository.strip()
 
-        if repository not in TRUSTED_REPOSITORIES:
+        if repository not in TRUSTED_REPOSITORY_KEYS:
             raise ValueError(
                 "code change requires a trusted repository: "
                 "ai-hq or dripvid"
