@@ -101,6 +101,21 @@ class Delivery(Base):
         nullable=True,
     )
 
+    deployment_release_id: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+
+    deployment_prior_release_id: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+
+    deployed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

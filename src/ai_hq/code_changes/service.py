@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ai_hq.code_changes.candidate_store import CandidateStore
+from ai_hq.code_changes.deployer import CandidateDeployer, DeployedRelease
 from ai_hq.code_changes.publisher import CandidatePublisher, PublishedCandidate
 from ai_hq.delivery.agent_runner import DeliveryAgentRunner
 from ai_hq.delivery.models import DeliveryStage, QAResult
@@ -70,6 +71,8 @@ class CodeChangeResult:
     high_risk: bool
     published: bool = False
     deployed: bool = False
+    deployment_release_id: str | None = None
+    deployment_prior_release_id: str | None = None
 
 
 class CodeChangeService:
@@ -79,10 +82,12 @@ class CodeChangeService:
     Natural-language intent resolution happens before this service.
     Candidate preparation remains isolated from publication. Publication
     is available only through the injected narrow publisher and only after
-    the exact persisted human approval is confirmed.
+    the exact persisted human approval is confirmed. Deployment is available
+    only through the injected narrow deployer after the same approval and an
+    already-published candidate identity.
 
-    It does not merge, deploy, restart services, invoke Host Helper,
-    execute arbitrary shell commands, or mutate production.
+    It does not merge, restart services, invoke Host Helper, execute
+    arbitrary shell commands, or mutate production on its own.
     """
 
     def __init__(
@@ -93,12 +98,14 @@ class CodeChangeService:
         runner_factory: DeliveryRunnerFactory,
         candidate_store: CandidateStore | None = None,
         publisher: CandidatePublisher | None = None,
+        deployer: CandidateDeployer | None = None,
     ) -> None:
         self.mission_service = mission_service
         self.delivery_service = delivery_service
         self.runner_factory = runner_factory
         self.candidate_store = candidate_store
         self.publisher = publisher
+        self.deployer = deployer
 
     def queue_candidate(
         self,
@@ -444,6 +451,108 @@ class CodeChangeService:
             repository=repository,
         )
 
+    def deploy_approved_candidate(
+        self,
+        *,
+        mission_id: str,
+        approval_reference: str,
+        change_ref: str,
+    ) -> CodeChangeResult:
+        mission = self.mission_service.get_mission(mission_id)
+        if (
+            mission.owner_agent != "developer"
+            or mission.source != "hq_chat_code_change"
+        ):
+            raise ValueError("mission is not an HQ code change")
+
+        objectives = mission.objectives or []
+        if not objectives:
+            raise ValueError("code-change mission has no repository")
+        repository = self._trusted_repository(objectives[0])
+
+        delivery = self.delivery_service.get_delivery(mission_id)
+        if delivery.qa_result is not QAResult.PASSED:
+            raise ValueError("QA must pass before candidate deployment")
+        if delivery.stage is not DeliveryStage.WAITING_APPROVAL:
+            raise ValueError("candidate is not waiting for approved deployment")
+        if delivery.approval_reference != approval_reference:
+            raise ValueError("approval reference does not match delivery")
+        if delivery.change_ref != change_ref:
+            raise ValueError("change_ref does not match approved proposal")
+
+        decided = self.delivery_service.apply_human_decision(
+            mission_id=mission_id,
+            approval_reference=approval_reference,
+            change_ref=change_ref,
+        )
+        if (
+            decided.stage is not DeliveryStage.WAITING_APPROVAL
+            or decided.qa_result is not QAResult.PASSED
+            or decided.approval_reference != approval_reference
+        ):
+            raise ValueError("approved human approval is required for deployment")
+
+        publication = (
+            getattr(decided, "published_branch", None),
+            getattr(decided, "published_commit", None),
+            getattr(decided, "published_tree", None),
+        )
+        if not all(value is not None for value in publication):
+            raise ValueError("candidate must be published before deployment")
+
+        deployment = (
+            getattr(decided, "deployment_release_id", None),
+            getattr(decided, "deployment_prior_release_id", None),
+        )
+        if deployment[0] is not None or deployment[1] is not None:
+            return self._result_for_mission(
+                mission_id=mission_id,
+                repository=repository,
+            )
+
+        if self.deployer is None or self.candidate_store is None:
+            raise RuntimeError("code-change deployment is not configured")
+
+        candidate = self.candidate_store.load_verified(
+            mission_id=mission_id,
+            change_ref=change_ref,
+            changed_files=tuple(decided.changed_files or []),
+            evidence=dict(decided.developer_evidence or {}),
+        )
+        if candidate.repository != repository:
+            raise ValueError("candidate repository does not match mission repository")
+        if candidate.change_ref != change_ref:
+            raise ValueError("candidate change_ref does not match approved proposal")
+
+        published = PublishedCandidate(
+            repository=repository,
+            change_ref=change_ref,
+            branch_name=publication[0],
+            commit_sha=publication[1],
+            tree_sha=publication[2],
+            base_commit=candidate.base_commit,
+        )
+
+        deployed = self.deployer.deploy(published)
+        if not isinstance(deployed, DeployedRelease):
+            raise TypeError("deployer must return DeployedRelease")
+        if deployed.repository != repository:
+            raise ValueError("deployed repository does not match candidate")
+        if deployed.change_ref != change_ref:
+            raise ValueError("deployed change_ref does not match candidate")
+
+        self.delivery_service.record_deployment(
+            mission_id=mission_id,
+            change_ref=change_ref,
+            release_id=deployed.release_id,
+            prior_release_id=deployed.prior_release_id,
+        )
+
+        return self._result_for_mission(
+            mission_id=mission_id,
+            repository=repository,
+        )
+
     def prepare_candidate(
         self,
         *,
@@ -583,6 +692,11 @@ class CodeChangeService:
             getattr(final_delivery, "published_tree", None),
         )
         published = all(value is not None for value in publication)
+        deployment = (
+            getattr(final_delivery, "deployment_release_id", None),
+            getattr(final_delivery, "deployment_prior_release_id", None),
+        )
+        deployed = deployment[0] is not None
 
         return CodeChangeResult(
             mission_id=mission_id,
@@ -607,7 +721,9 @@ class CodeChangeService:
                 changed_files=changed_files,
             ),
             published=published,
-            deployed=False,
+            deployed=deployed,
+            deployment_release_id=deployment[0],
+            deployment_prior_release_id=deployment[1],
         )
 
     @staticmethod

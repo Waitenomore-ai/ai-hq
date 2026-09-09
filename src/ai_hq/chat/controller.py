@@ -510,7 +510,7 @@ class ChatController:
                 f"`{result.change_ref}`\n\n"
                 f"**Review:** {risk}\n\n"
                 f"**Status:** {status}\n\n"
-                "No code was published or deployed."
+                f"{self._code_change_outcome(result)}"
             ),
             mission_id=mission_id,
         )
@@ -524,6 +524,39 @@ class ChatController:
             message=message,
             mission_id=mission_id,
         )
+
+    @staticmethod
+    def _code_change_outcome(result: Any) -> str:
+        deployed = bool(getattr(result, "deployed", False))
+        published = bool(getattr(result, "published", False))
+
+        if deployed:
+            release_id = getattr(result, "deployment_release_id", None)
+            prior = getattr(result, "deployment_prior_release_id", None)
+            release_line = (
+                f"`{release_id}`"
+                if release_id
+                else "confirmed"
+            )
+            prior_line = (
+                f"\n\n**Rollback release:** `{prior}`"
+                if prior
+                else ""
+            )
+            return (
+                "The approved candidate was deployed.\n\n"
+                f"**Deployed release:** {release_line}"
+                f"{prior_line}"
+            )
+
+        if published:
+            return (
+                "The approved candidate was published for "
+                "release review. Deployment is a separate "
+                "approved operation."
+            )
+
+        return "No code was published or deployed."
 
     def _conversation_reply(
         self,

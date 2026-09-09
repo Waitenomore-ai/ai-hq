@@ -30,6 +30,8 @@ class FakeCodeChangeResult:
     high_risk: bool = False
     published: bool = False
     deployed: bool = False
+    deployment_release_id: str | None = None
+    deployment_prior_release_id: str | None = None
 
     def __post_init__(self):
         if self.developer_evidence is None:
@@ -207,3 +209,90 @@ def test_existing_conversation_path_still_works_without_code_service():
     )
 
     assert result.state == "complete"
+
+
+def test_completed_code_change_reply_surfaces_deployment_release():
+    controller, chat, _changes = build_controller()
+
+    class DeployedResult:
+        repository = "dripvid"
+        summary = "Toolbar reduced"
+        change_ref = "sha256:" + ("a" * 64)
+        changed_files = (
+            "public/css/app.css",
+        )
+        ready_for_approval = True
+        high_risk = False
+        published = True
+        deployed = True
+        deployment_release_id = "dripvid-2026-09-09.rc1"
+        deployment_prior_release_id = "dripvid-2026-09-08.prod"
+
+    class DeployedChanges:
+        def candidate_result(self, **kwargs):
+            return DeployedResult()
+
+    controller.code_change_service = DeployedChanges()
+
+    mission_id = "mission-code-1"
+    chat.add_message(
+        conversation_id="conversation-1",
+        owner_session_id="session-1",
+        role="user",
+        content="deploy",
+        mission_id=mission_id,
+    )
+
+    result = controller._completed_code_change_reply(
+        owner_session_id="session-1",
+        conversation_id="conversation-1",
+        mission_id=mission_id,
+    )
+
+    assert "Deployed release" in result.message.content
+    assert "dripvid-2026-09-09.rc1" in result.message.content
+    assert "Rollback release" in result.message.content
+    assert "dripvid-2026-09-08.prod" in result.message.content
+
+
+def test_completed_code_change_reply_keeps_bound_text_when_nothing_deployed():
+    controller, _chat, _changes = build_controller()
+
+    class PendingResult:
+        repository = "dripvid"
+        summary = "Toolbar reduced"
+        change_ref = "sha256:" + ("a" * 64)
+        changed_files = (
+            "public/css/app.css",
+        )
+        ready_for_approval = True
+        high_risk = False
+        published = False
+        deployed = False
+
+    class PendingChanges:
+        def candidate_result(self, **kwargs):
+            return PendingResult()
+
+    controller.code_change_service = PendingChanges()
+
+    mission_id = "mission-code-1"
+    chat = controller.chat_service
+    chat.add_message(
+        conversation_id="conversation-1",
+        owner_session_id="session-1",
+        role="user",
+        content="status",
+        mission_id=mission_id,
+    )
+
+    result = controller._completed_code_change_reply(
+        owner_session_id="session-1",
+        conversation_id="conversation-1",
+        mission_id=mission_id,
+    )
+
+    assert (
+        "No code was published or deployed."
+        in result.message.content
+    )

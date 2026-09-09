@@ -13,6 +13,7 @@ from ai_hq.missions.models import Mission, MissionStatus
 SessionFactory = Callable[[], Session]
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _PUBLISH_BRANCH_PREFIX = "ai-hq/candidate/"
+_RELEASE_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _approval_expired(expires_at: datetime) -> bool:
@@ -20,6 +21,14 @@ def _approval_expired(expires_at: datetime) -> bool:
     if boundary.tzinfo is None:
         boundary = boundary.replace(tzinfo=UTC)
     return boundary <= datetime.now(UTC)
+
+
+def _release_id_valid(release_id: str) -> bool:
+    if len(release_id) > 128:
+        return False
+    if not release_id.isascii():
+        return False
+    return _RELEASE_ID_RE.fullmatch(release_id) is not None
 
 
 class DeliveryService:
@@ -265,6 +274,84 @@ class DeliveryService:
             delivery.published_commit = commit_sha
             delivery.published_tree = tree_sha
             delivery.published_at = datetime.now(UTC)
+
+            db.commit()
+            db.refresh(delivery)
+            return delivery
+
+    def record_deployment(
+        self,
+        *,
+        mission_id: str,
+        change_ref: str,
+        release_id: str,
+        prior_release_id: str | None = None,
+    ) -> Delivery:
+        if not isinstance(release_id, str) or not _release_id_valid(release_id):
+            raise ValueError("release id must use the trusted release identity charset")
+        if (
+            prior_release_id is not None
+            and not _release_id_valid(prior_release_id)
+        ):
+            raise ValueError(
+                "prior release id must use the trusted release identity charset"
+            )
+
+        approvals = ApprovalService(self.session_factory)
+
+        with self.session_factory() as db:
+            mission = db.get(Mission, mission_id)
+            if mission is None:
+                raise KeyError(f"mission not found: {mission_id}")
+
+            delivery = (
+                db.query(Delivery)
+                .filter(Delivery.mission_id == mission_id)
+                .one_or_none()
+            )
+            if delivery is None:
+                raise KeyError(f"delivery not found for mission: {mission_id}")
+
+            if delivery.change_ref != change_ref:
+                raise ValueError("change_ref does not match deployment candidate")
+            if delivery.stage is not DeliveryStage.WAITING_APPROVAL:
+                raise ValueError("delivery is not waiting for deployment approval")
+            if delivery.qa_result is not QAResult.PASSED:
+                raise ValueError("QA must pass before deployment")
+            if not delivery.approval_reference:
+                raise ValueError("deployment requires human approval")
+            if not (
+                delivery.published_branch
+                and delivery.published_commit
+                and delivery.published_tree
+            ):
+                raise ValueError("candidate must be published before deployment")
+
+            approval = approvals.get_request(delivery.approval_reference)
+            if approval.mission_id != mission_id:
+                raise ValueError("approval mission does not match deployment")
+            if approval.target != change_ref:
+                raise ValueError("approval target does not match change_ref")
+            if (approval.action_plan or {}).get("change_ref") != change_ref:
+                raise ValueError("approval action plan does not match change_ref")
+            if _approval_expired(approval.expires_at):
+                raise ValueError("deployment approval expired")
+            if approval.state is not ApprovalState.APPROVED:
+                raise ValueError("deployment requires approved human approval")
+
+            existing = (
+                delivery.deployment_release_id,
+                delivery.deployment_prior_release_id,
+            )
+            requested = (release_id, prior_release_id)
+            if existing[0] is not None or existing[1] is not None:
+                if existing != requested or delivery.deployed_at is None:
+                    raise ValueError("deployment identity does not match persisted deployment")
+                return delivery
+
+            delivery.deployment_release_id = release_id
+            delivery.deployment_prior_release_id = prior_release_id
+            delivery.deployed_at = datetime.now(UTC)
 
             db.commit()
             db.refresh(delivery)
