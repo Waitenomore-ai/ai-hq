@@ -255,6 +255,52 @@ def test_completed_code_change_reply_surfaces_deployment_release():
     assert "dripvid-2026-09-08.prod" in result.message.content
 
 
+def test_completed_code_change_reply_surfaces_rollback_release():
+    controller, chat, _changes = build_controller()
+
+    class RolledBackResult:
+        repository = "dripvid"
+        summary = "Toolbar reduced"
+        change_ref = "sha256:" + ("a" * 64)
+        changed_files = (
+            "public/css/app.css",
+        )
+        ready_for_approval = True
+        high_risk = False
+        published = True
+        deployed = True
+        deployment_release_id = "dripvid-2026-09-09.rc1"
+        deployment_prior_release_id = "dripvid-2026-09-08.prod"
+        rolled_back = True
+        rollback_release_id = "dripvid-2026-09-08.prod"
+
+    class RolledBackChanges:
+        def candidate_result(self, **kwargs):
+            return RolledBackResult()
+
+    controller.code_change_service = RolledBackChanges()
+
+    mission_id = "mission-code-1"
+    chat.add_message(
+        conversation_id="conversation-1",
+        owner_session_id="session-1",
+        role="user",
+        content="rollback",
+        mission_id=mission_id,
+    )
+
+    result = controller._completed_code_change_reply(
+        owner_session_id="session-1",
+        conversation_id="conversation-1",
+        mission_id=mission_id,
+    )
+
+    assert "rolled back" in result.message.content.lower()
+    assert "Restored release" in result.message.content
+    assert "dripvid-2026-09-08.prod" in result.message.content
+    assert "Deployed release" not in result.message.content
+
+
 def test_completed_code_change_reply_keeps_bound_text_when_nothing_deployed():
     controller, _chat, _changes = build_controller()
 

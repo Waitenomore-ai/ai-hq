@@ -10,7 +10,7 @@ def test_alembic_has_single_head() -> None:
 
     heads = script.get_heads()
 
-    assert heads == ["0018_delivery_release"]
+    assert heads == ["0019_delivery_rollback"]
 
 
 def test_recovery_status_migration_follows_mission_leases() -> None:
@@ -41,3 +41,14 @@ def test_delivery_release_migration_follows_delivery_publication() -> None:
     assert "deployment_release_id" in text
     assert "deployment_prior_release_id" in text
     assert "deployed_at" in text
+
+
+def test_delivery_rollback_migration_follows_delivery_release() -> None:
+    migration = Path("migrations/versions/0019_delivery_rollback.py")
+
+    assert migration.is_file()
+    text = migration.read_text()
+    assert 'revision = "0019_delivery_rollback"' in text
+    assert 'down_revision = "0018_delivery_release"' in text
+    assert "rollback_release_id" in text
+    assert "rolled_back_at" in text

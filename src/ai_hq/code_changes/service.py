@@ -6,6 +6,11 @@ from typing import Any, Protocol
 from ai_hq.code_changes.candidate_store import CandidateStore
 from ai_hq.code_changes.deployer import CandidateDeployer, DeployedRelease
 from ai_hq.code_changes.publisher import CandidatePublisher, PublishedCandidate
+from ai_hq.code_changes.rollbacker import (
+    CandidateRollbacker,
+    RolledBackRelease,
+    RollbackTarget,
+)
 from ai_hq.delivery.agent_runner import DeliveryAgentRunner
 from ai_hq.delivery.models import DeliveryStage, QAResult
 from ai_hq.delivery.service import DeliveryService
@@ -73,6 +78,8 @@ class CodeChangeResult:
     deployed: bool = False
     deployment_release_id: str | None = None
     deployment_prior_release_id: str | None = None
+    rolled_back: bool = False
+    rollback_release_id: str | None = None
 
 
 class CodeChangeService:
@@ -84,7 +91,9 @@ class CodeChangeService:
     is available only through the injected narrow publisher and only after
     the exact persisted human approval is confirmed. Deployment is available
     only through the injected narrow deployer after the same approval and an
-    already-published candidate identity.
+    already-published candidate identity. Rollback is available only through
+    the injected narrow rollbacker after the same approval and an
+    already-recorded deployment whose prior known-good release is restored.
 
     It does not merge, restart services, invoke Host Helper, execute
     arbitrary shell commands, or mutate production on its own.
@@ -99,6 +108,7 @@ class CodeChangeService:
         candidate_store: CandidateStore | None = None,
         publisher: CandidatePublisher | None = None,
         deployer: CandidateDeployer | None = None,
+        rollbacker: CandidateRollbacker | None = None,
     ) -> None:
         self.mission_service = mission_service
         self.delivery_service = delivery_service
@@ -106,6 +116,7 @@ class CodeChangeService:
         self.candidate_store = candidate_store
         self.publisher = publisher
         self.deployer = deployer
+        self.rollbacker = rollbacker
 
     def queue_candidate(
         self,
@@ -553,6 +564,121 @@ class CodeChangeService:
             repository=repository,
         )
 
+    def rollback_approved_deployment(
+        self,
+        *,
+        mission_id: str,
+        approval_reference: str,
+        change_ref: str,
+    ) -> CodeChangeResult:
+        mission = self.mission_service.get_mission(mission_id)
+        if (
+            mission.owner_agent != "developer"
+            or mission.source != "hq_chat_code_change"
+        ):
+            raise ValueError("mission is not an HQ code change")
+
+        objectives = mission.objectives or []
+        if not objectives:
+            raise ValueError("code-change mission has no repository")
+        repository = self._trusted_repository(objectives[0])
+
+        delivery = self.delivery_service.get_delivery(mission_id)
+        if delivery.qa_result is not QAResult.PASSED:
+            raise ValueError("QA must pass before candidate rollback")
+        if delivery.stage is not DeliveryStage.WAITING_APPROVAL:
+            raise ValueError("candidate is not waiting for approved rollback")
+        if delivery.approval_reference != approval_reference:
+            raise ValueError("approval reference does not match delivery")
+        if delivery.change_ref != change_ref:
+            raise ValueError("change_ref does not match approved proposal")
+
+        decided = self.delivery_service.apply_human_decision(
+            mission_id=mission_id,
+            approval_reference=approval_reference,
+            change_ref=change_ref,
+        )
+        if (
+            decided.stage is not DeliveryStage.WAITING_APPROVAL
+            or decided.qa_result is not QAResult.PASSED
+            or decided.approval_reference != approval_reference
+        ):
+            raise ValueError("approved human approval is required for rollback")
+
+        publication = (
+            getattr(decided, "published_branch", None),
+            getattr(decided, "published_commit", None),
+            getattr(decided, "published_tree", None),
+        )
+        if not all(value is not None for value in publication):
+            raise ValueError("candidate must be published before rollback")
+
+        deployment_release_id = getattr(
+            decided,
+            "deployment_release_id",
+            None,
+        )
+        prior_release_id = getattr(
+            decided,
+            "deployment_prior_release_id",
+            None,
+        )
+        if deployment_release_id is None:
+            raise ValueError("candidate must be deployed before rollback")
+        if prior_release_id is None:
+            raise ValueError(
+                "no prior known-good release is recorded for rollback"
+            )
+
+        existing_rollback = getattr(
+            decided,
+            "rollback_release_id",
+            None,
+        )
+        if existing_rollback is not None:
+            if existing_rollback != prior_release_id:
+                raise ValueError(
+                    "rollback identity does not match persisted rollback"
+                )
+            return self._result_for_mission(
+                mission_id=mission_id,
+                repository=repository,
+            )
+
+        if self.rollbacker is None:
+            raise RuntimeError("code-change rollback is not configured")
+
+        target = RollbackTarget(
+            repository=repository,
+            change_ref=change_ref,
+        )
+
+        rolled_back = self.rollbacker.rollback(
+            target,
+            release_id=prior_release_id,
+        )
+        if not isinstance(rolled_back, RolledBackRelease):
+            raise TypeError("rollbacker must return RolledBackRelease")
+        if rolled_back.repository != repository:
+            raise ValueError("rolled back repository does not match candidate")
+        if rolled_back.change_ref != change_ref:
+            raise ValueError("rolled back change_ref does not match candidate")
+        if rolled_back.release_id != prior_release_id:
+            raise ValueError(
+                "rolled back release does not match persisted history"
+            )
+
+        self.delivery_service.record_rollback(
+            mission_id=mission_id,
+            change_ref=change_ref,
+            release_id=rolled_back.release_id,
+        )
+
+        return self._result_for_mission(
+            mission_id=mission_id,
+            repository=repository,
+        )
+
     def prepare_candidate(
         self,
         *,
@@ -697,6 +823,11 @@ class CodeChangeService:
             getattr(final_delivery, "deployment_prior_release_id", None),
         )
         deployed = deployment[0] is not None
+        rollback_release_id = getattr(
+            final_delivery,
+            "rollback_release_id",
+            None,
+        )
 
         return CodeChangeResult(
             mission_id=mission_id,
@@ -724,6 +855,8 @@ class CodeChangeService:
             deployed=deployed,
             deployment_release_id=deployment[0],
             deployment_prior_release_id=deployment[1],
+            rolled_back=rollback_release_id is not None,
+            rollback_release_id=rollback_release_id,
         )
 
     @staticmethod

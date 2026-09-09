@@ -527,8 +527,21 @@ class ChatController:
 
     @staticmethod
     def _code_change_outcome(result: Any) -> str:
+        rolled_back = bool(getattr(result, "rolled_back", False))
         deployed = bool(getattr(result, "deployed", False))
         published = bool(getattr(result, "published", False))
+
+        if rolled_back:
+            release_id = getattr(result, "rollback_release_id", None)
+            release_line = (
+                f"`{release_id}`"
+                if release_id
+                else "confirmed"
+            )
+            return (
+                "The approved candidate was rolled back.\n\n"
+                f"**Restored release:** {release_line}"
+            )
 
         if deployed:
             release_id = getattr(result, "deployment_release_id", None)

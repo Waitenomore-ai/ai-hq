@@ -357,6 +357,89 @@ class DeliveryService:
             db.refresh(delivery)
             return delivery
 
+    def record_rollback(
+        self,
+        *,
+        mission_id: str,
+        change_ref: str,
+        release_id: str,
+    ) -> Delivery:
+        """Persist an approved rollback restoring the prior known-good release.
+
+        The restored release must equal the persisted deployment history's
+        ``deployment_prior_release_id``. The caller never selects it from
+        model output or arbitrary input; it is derived from trusted history.
+        """
+        if not isinstance(release_id, str) or not _release_id_valid(release_id):
+            raise ValueError("release id must use the trusted release identity charset")
+
+        approvals = ApprovalService(self.session_factory)
+
+        with self.session_factory() as db:
+            mission = db.get(Mission, mission_id)
+            if mission is None:
+                raise KeyError(f"mission not found: {mission_id}")
+
+            delivery = (
+                db.query(Delivery)
+                .filter(Delivery.mission_id == mission_id)
+                .one_or_none()
+            )
+            if delivery is None:
+                raise KeyError(f"delivery not found for mission: {mission_id}")
+
+            if delivery.change_ref != change_ref:
+                raise ValueError("change_ref does not match rollback candidate")
+            if delivery.stage is not DeliveryStage.WAITING_APPROVAL:
+                raise ValueError("delivery is not waiting for rollback approval")
+            if delivery.qa_result is not QAResult.PASSED:
+                raise ValueError("QA must pass before rollback")
+            if not delivery.approval_reference:
+                raise ValueError("rollback requires human approval")
+            if not (
+                delivery.published_branch
+                and delivery.published_commit
+                and delivery.published_tree
+            ):
+                raise ValueError("candidate must be published before rollback")
+            if not delivery.deployment_release_id:
+                raise ValueError("candidate must be deployed before rollback")
+            if not delivery.deployment_prior_release_id:
+                raise ValueError("no prior known-good release is recorded for rollback")
+            if delivery.deployment_prior_release_id != release_id:
+                raise ValueError(
+                    "rollback release must resolve from trusted deployment history",
+                )
+
+            approval = approvals.get_request(delivery.approval_reference)
+            if approval.mission_id != mission_id:
+                raise ValueError("approval mission does not match rollback")
+            if approval.target != change_ref:
+                raise ValueError("approval target does not match change_ref")
+            if (approval.action_plan or {}).get("change_ref") != change_ref:
+                raise ValueError("approval action plan does not match change_ref")
+            if _approval_expired(approval.expires_at):
+                raise ValueError("rollback approval expired")
+            if approval.state is not ApprovalState.APPROVED:
+                raise ValueError("rollback requires approved human approval")
+
+            if delivery.rollback_release_id is not None or delivery.rolled_back_at is not None:
+                if (
+                    delivery.rollback_release_id != release_id
+                    or delivery.rolled_back_at is None
+                ):
+                    raise ValueError(
+                        "rollback identity does not match persisted rollback"
+                    )
+                return delivery
+
+            delivery.rollback_release_id = release_id
+            delivery.rolled_back_at = datetime.now(UTC)
+
+            db.commit()
+            db.refresh(delivery)
+            return delivery
+
     def apply_human_decision(
         self,
         *,
