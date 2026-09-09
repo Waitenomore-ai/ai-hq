@@ -343,3 +343,49 @@ def test_phase_a_result_never_claims_deployment():
 
     assert result.deployed is False
     assert result.published is False
+
+
+def test_result_carries_repository_description_when_configured():
+    mission_service = FakeMissionService()
+    delivery_service = FakeDeliveryService()
+    runner_factory = FakeRunnerFactory(
+        delivery_service,
+        qa_passes=True,
+    )
+
+    service = CodeChangeService(
+        mission_service=mission_service,
+        delivery_service=delivery_service,
+        runner_factory=runner_factory,
+        repository_descriptions={
+            "dripvid": (
+                "DripVid — the Vue web app for video editing."
+            ),
+        },
+    )
+
+    result = service.prepare_candidate(
+        repository="dripvid",
+        instruction="Make the toolbar smaller",
+    )
+
+    assert result.repository == "dripvid"
+    assert result.repository_description == (
+        "DripVid — the Vue web app for video editing."
+    )
+
+
+def test_result_repository_description_defaults_to_empty():
+    (
+        service,
+        _mission_service,
+        _delivery_service,
+        _runner_factory,
+    ) = build_service()
+
+    result = service.prepare_candidate(
+        repository="dripvid",
+        instruction="Make the toolbar smaller",
+    )
+
+    assert result.repository_description == ""

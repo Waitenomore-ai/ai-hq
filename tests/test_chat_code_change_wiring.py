@@ -28,6 +28,7 @@ class FakeCodeChangeResult:
     approval_reference: str | None = "approval-1"
     ready_for_approval: bool = True
     high_risk: bool = False
+    repository_description: str = ""
     published: bool = False
     deployed: bool = False
     rolled_back: bool = False
@@ -476,3 +477,52 @@ def test_completed_code_change_reply_not_ready_has_no_approval_prompt():
     assert "NOT READY FOR APPROVAL" in content
     assert "HIGH RISK" in content
     assert "Reply with `approve`" not in content
+
+
+def test_completed_code_change_reply_surfaces_repository_description():
+    controller, chat, _changes = build_controller()
+
+    class DescribedResult:
+        repository = "dripvid"
+        summary = "Toolbar reduced"
+        change_ref = "sha256:" + ("a" * 64)
+        changed_files = (
+            "public/css/app.css",
+        )
+        qa_result = "PASSED"
+        repository_description = (
+            "DripVid — the Vue web app for video editing."
+        )
+        ready_for_approval = True
+        high_risk = False
+        published = False
+        deployed = False
+
+    class DescribedChanges:
+        def candidate_result(self, **kwargs):
+            return DescribedResult()
+
+    controller.code_change_service = DescribedChanges()
+
+    mission_id = "mission-code-1"
+    chat.add_message(
+        conversation_id="conversation-1",
+        owner_session_id="session-1",
+        role="user",
+        content="status",
+        mission_id=mission_id,
+    )
+
+    result = controller._completed_code_change_reply(
+        owner_session_id="session-1",
+        conversation_id="conversation-1",
+        mission_id=mission_id,
+    )
+
+    content = result.message.content
+
+    assert (
+        "## Code Candidate: "
+        "dripvid — DripVid — the Vue web app for video editing."
+        in content
+    )

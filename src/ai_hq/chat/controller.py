@@ -506,6 +506,16 @@ class ChatController:
 
         qa_label = self._qa_result_label(result)
         action_prompt = self._approval_action_prompt(result)
+        description = getattr(
+            result,
+            "repository_description",
+            "",
+        )
+        target = (
+            f"{result.repository} — {description}"
+            if description
+            else result.repository
+        )
 
         message = self.chat_service.add_message(
             conversation_id=conversation_id,
@@ -513,7 +523,7 @@ class ChatController:
             role="assistant",
             content=(
                 f"## Code Candidate: "
-                f"{result.repository}\n\n"
+                f"{target}\n\n"
                 f"{result.summary}\n\n"
                 f"**Changed files:** {changed_label}\n\n"
                 f"{changed}\n\n"

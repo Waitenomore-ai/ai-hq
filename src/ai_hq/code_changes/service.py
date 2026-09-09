@@ -67,6 +67,7 @@ class CodeChangeResult:
     approval_reference: str | None
     ready_for_approval: bool
     high_risk: bool
+    repository_description: str = ""
     published: bool = False
     deployed: bool = False
     deployment_release_id: str | None = None
@@ -102,6 +103,7 @@ class CodeChangeService:
         publisher: CandidatePublisher | None = None,
         deployer: CandidateDeployer | None = None,
         rollbacker: CandidateRollbacker | None = None,
+        repository_descriptions: dict[str, str] | None = None,
     ) -> None:
         self.mission_service = mission_service
         self.delivery_service = delivery_service
@@ -110,6 +112,11 @@ class CodeChangeService:
         self.publisher = publisher
         self.deployer = deployer
         self.rollbacker = rollbacker
+        self.repository_descriptions = (
+            repository_descriptions
+            if repository_descriptions is not None
+            else {}
+        )
 
     def queue_candidate(
         self,
@@ -843,6 +850,12 @@ class CodeChangeService:
             high_risk=self._high_risk(
                 repository=repository,
                 changed_files=changed_files,
+            ),
+            repository_description=(
+                self.repository_descriptions.get(
+                    repository,
+                    "",
+                )
             ),
             published=published,
             deployed=deployed,
